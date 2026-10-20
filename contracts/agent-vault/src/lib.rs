@@ -38,6 +38,12 @@ const PENDING_UPGRADE_KEY: Symbol = symbol_short!("p_upg");
 // time to observe the proposal and exit before the enforcement code changes.
 const UPGRADE_TIMELOCK_LEDGERS: u32 = 17_280;
 
+// After the notice period expires, the admin has an additional grace window in
+// which to call `execute_upgrade` before the proposal expires. A proposal that
+// is never executed within `ready_at_ledger + UPGRADE_GRACE_LEDGERS` is
+// considered stale and must be re-proposed (#63).
+const UPGRADE_GRACE_LEDGERS: u32 = 17_280; // one additional day
+
 // ── Event names ──────────────────────────────────────────────────────────────
 // Longer than 9 chars — must use Symbol::new(&env, ...) at call sites.
 const EVT_PAYMENT_AUTHORIZED: &str = "payment_authorized";
@@ -80,6 +86,9 @@ pub enum Error {
     /// the governed payer account, so only it may be attributed (#16).
     PayerNotVault = 17,
     UnauthorizedToken = 18,
+    /// The upgrade proposal's grace window has lapsed — re-propose to restart
+    /// the timelock (#63).
+    UpgradeExpired = 19,
 }
 
 fn validate_cap(env: &Env, cap: i128) {
@@ -377,6 +386,40 @@ impl AgentVault {
             .unwrap_or(0)
     }
 
+    /// Return the total USDC (stroops) spent by this vault in the current day
+    /// bucket (the 17,280-ledger window containing the current ledger). (#64)
+    ///
+    /// Returns 0 if no spend has been recorded in the current bucket (including
+    /// when the bucket's temporary entry has been archived).
+    pub fn get_daily_spend(env: Env) -> i128 {
+        let day_bucket: u32 = env.ledger().sequence() / 17_280;
+        let spend_key = (SPEND_PREFIX, day_bucket);
+        env.storage()
+            .temporary()
+            .get::<(Symbol, u32), i128>(&spend_key)
+            .unwrap_or(0)
+    }
+
+    /// Return the USDC (stroops) still available under the global daily cap for
+    /// the current day bucket. (#64)
+    ///
+    /// The value is `max(0, daily_cap - get_daily_spend())`. A cap of 0 means
+    /// unlimited; this view returns `i128::MAX` in that case. Callers that need
+    /// to distinguish "no cap configured" from "cap exhausted" should call
+    /// `daily_cap()` directly.
+    pub fn get_remaining_allowance(env: Env) -> i128 {
+        let storage = env.storage().instance();
+        let daily_cap: i128 = storage.get(&CAP_KEY).unwrap_or(i128::MAX);
+        let day_bucket: u32 = env.ledger().sequence() / 17_280;
+        let spend_key = (SPEND_PREFIX, day_bucket);
+        let day_spend: i128 = env
+            .storage()
+            .temporary()
+            .get::<(Symbol, u32), i128>(&spend_key)
+            .unwrap_or(0);
+        daily_cap.saturating_sub(day_spend).max(0)
+    }
+
     /// Initiate a transfer of admin rights to a new address. Admin only.
     pub fn transfer_admin(env: Env, new_admin: Address) {
         let storage = env.storage().instance();
@@ -465,7 +508,10 @@ impl AgentVault {
     }
 
     /// Execute the current Wasm proposal once its ledger delay has elapsed. Admin only.
-    /// Execution is allowed at exactly `ready_at_ledger`.
+    /// Execution is allowed at exactly `ready_at_ledger` and up to
+    /// `ready_at_ledger + UPGRADE_GRACE_LEDGERS - 1` (inclusive). A proposal
+    /// not executed within the grace window is considered stale and must be
+    /// re-proposed (#63).
     pub fn execute_upgrade(env: Env) {
         let storage = env.storage().instance();
         let admin: Address = storage
@@ -475,8 +521,18 @@ impl AgentVault {
         let (new_wasm_hash, ready_at_ledger): (BytesN<32>, u32) = storage
             .get(&PENDING_UPGRADE_KEY)
             .unwrap_or_else(|| panic_with_error!(&env, Error::NoPendingUpgrade));
-        if env.ledger().sequence() < ready_at_ledger {
+        let current = env.ledger().sequence();
+        if current < ready_at_ledger {
             panic_with_error!(&env, Error::UpgradeNotReady);
+        }
+        // Enforce grace window: the proposal must be executed within
+        // UPGRADE_GRACE_LEDGERS of the ready ledger (#63). Saturating add
+        // avoids overflow on a pathological ready_at_ledger value.
+        let expires_at = ready_at_ledger.saturating_add(UPGRADE_GRACE_LEDGERS);
+        if current >= expires_at {
+            // Clear the stale proposal so it does not block a future proposal.
+            storage.remove(&PENDING_UPGRADE_KEY);
+            panic_with_error!(&env, Error::UpgradeExpired);
         }
 
         env.deployer()
@@ -515,6 +571,12 @@ impl AgentVault {
     /// Return the mandatory proposal delay in ledgers (view-only).
     pub fn upgrade_timelock_ledgers(_env: Env) -> u32 {
         UPGRADE_TIMELOCK_LEDGERS
+    }
+
+    /// Return the post-readiness grace window in ledgers after which an
+    /// unexecuted proposal is considered stale and is cleared (view-only). (#63)
+    pub fn upgrade_grace_ledgers(_env: Env) -> u32 {
+        UPGRADE_GRACE_LEDGERS
     }
 
     /// Return the global daily spend cap (view-only).
@@ -2882,6 +2944,68 @@ mod tests {
         );
     }
 
+    // ── #63: upgrade grace window tests ─────────────────────────────────────
+
+    /// Execution one ledger before the grace window expires still succeeds.
+    #[test]
+    fn test_execute_upgrade_at_end_of_grace_window_succeeds() {
+        let env = Env::default();
+        let (client, _agent_sk, vault_id, _provider_a) = setup(&env);
+        env.mock_all_auths();
+        let new_wasm_hash = env.deployer().upload_contract_wasm(Bytes::new(&env));
+        env.ledger().set_sequence_number(1_000);
+        client.propose_upgrade(&new_wasm_hash);
+
+        // Advance to the last ledger inside the grace window
+        let ready_at_ledger = 1_000 + UPGRADE_TIMELOCK_LEDGERS;
+        let last_valid_ledger = ready_at_ledger + UPGRADE_GRACE_LEDGERS - 1;
+        env.ledger().set_sequence_number(last_valid_ledger);
+        // Should succeed — still inside the grace window
+        client.execute_upgrade();
+
+        let pending: Option<(BytesN<32>, u32)> = env.as_contract(&vault_id, || {
+            env.storage().instance().get(&PENDING_UPGRADE_KEY)
+        });
+        assert_eq!(pending, None, "proposal must be cleared after execution");
+    }
+
+    /// Execution exactly at the expiry ledger (ready + grace) is rejected with
+    /// UpgradeExpired and the stale proposal is cleared (#63).
+    #[test]
+    fn test_execute_upgrade_after_grace_window_fails_and_clears_proposal() {
+        let env = Env::default();
+        let (client, _agent_sk, vault_id, _provider_a) = setup(&env);
+        env.mock_all_auths();
+        env.ledger().set_sequence_number(1_000);
+        let missing_hash = BytesN::<32>::random(&env);
+        client.propose_upgrade(&missing_hash);
+
+        let ready_at_ledger = 1_000 + UPGRADE_TIMELOCK_LEDGERS;
+        // Advance to ready + grace (one ledger past the valid window)
+        env.ledger().set_sequence_number(ready_at_ledger + UPGRADE_GRACE_LEDGERS);
+
+        let result = env.try_invoke_contract::<(), Error>(
+            &vault_id,
+            &Symbol::new(&env, "execute_upgrade"),
+            Vec::new(&env),
+        );
+        assert_eq!(result.unwrap_err().unwrap(), Error::UpgradeExpired, "should fail with UpgradeExpired");
+
+        // Stale proposal must be cleared so it does not block a future proposal
+        let pending: Option<(BytesN<32>, u32)> = env.as_contract(&vault_id, || {
+            env.storage().instance().get(&PENDING_UPGRADE_KEY)
+        });
+        assert_eq!(pending, None, "stale proposal must be cleared on expiry");
+    }
+
+    /// upgrade_grace_ledgers() view returns the constant.
+    #[test]
+    fn test_upgrade_grace_ledgers_view() {
+        let env = Env::default();
+        let (client, _agent_sk, _vault_id, _provider_a) = setup(&env);
+        assert_eq!(client.upgrade_grace_ledgers(), UPGRADE_GRACE_LEDGERS);
+    }
+
     /// Cancellation remains available after the proposal reaches its ready ledger.
     #[test]
     fn test_cancel_upgrade_after_ready_clears_proposal_and_emits_notice() {
@@ -3306,6 +3430,117 @@ mod tests {
             },
         }]);
         client.set_agent_pubkey(&new_pk);
+    }
+
+    // ── #64: get_daily_spend and get_remaining_allowance view functions ──────
+
+    /// get_daily_spend returns 0 before any payment.
+    #[test]
+    fn test_get_daily_spend_zero_initially() {
+        let env = Env::default();
+        let (client, _, _, _) = setup(&env);
+        assert_eq!(client.get_daily_spend(), 0, "initial daily spend should be 0");
+    }
+
+    /// get_daily_spend tracks successful payments correctly.
+    #[test]
+    fn test_get_daily_spend_tracks_payments() {
+        let env = Env::default();
+        let (_, agent_sk, vault_id, provider_a) = setup(&env);
+        let client = AgentVaultClient::new(&env, &vault_id);
+
+        let p1 = BytesN::<32>::random(&env);
+        let s1 = sign_payload(&env, &agent_sk, &p1);
+        let c1 = Vec::from_array(&env, [transfer_context(&env, &provider_a, 1_000_000)]);
+        env.try_invoke_contract_check_auth::<Error>(&vault_id, &p1, s1.into_val(&env), &c1).unwrap();
+
+        assert_eq!(client.get_daily_spend(), 1_000_000, "daily spend should reflect payment");
+
+        let p2 = BytesN::<32>::random(&env);
+        let s2 = sign_payload(&env, &agent_sk, &p2);
+        let c2 = Vec::from_array(&env, [transfer_context(&env, &provider_a, 500_000)]);
+        env.try_invoke_contract_check_auth::<Error>(&vault_id, &p2, s2.into_val(&env), &c2).unwrap();
+
+        assert_eq!(client.get_daily_spend(), 1_500_000, "daily spend should accumulate");
+    }
+
+    /// get_daily_spend resets when the day bucket rolls over.
+    #[test]
+    fn test_get_daily_spend_resets_on_new_bucket() {
+        let env = Env::default();
+        let (_, agent_sk, vault_id, provider_a) = setup(&env);
+        let client = AgentVaultClient::new(&env, &vault_id);
+        // Extend expiry so payments don't expire during the bucket advance
+        env.as_contract(&vault_id, || {
+            env.storage().instance().set(&EXPIRY_KEY, &500_000_u32);
+        });
+
+        let p = BytesN::<32>::random(&env);
+        let s = sign_payload(&env, &agent_sk, &p);
+        let c = Vec::from_array(&env, [transfer_context(&env, &provider_a, 2_000_000)]);
+        env.try_invoke_contract_check_auth::<Error>(&vault_id, &p, s.into_val(&env), &c).unwrap();
+        assert_eq!(client.get_daily_spend(), 2_000_000);
+
+        // Advance to day bucket 1
+        env.ledger().set_sequence_number(17_280);
+        assert_eq!(client.get_daily_spend(), 0, "daily spend resets on new bucket");
+    }
+
+    /// get_remaining_allowance returns daily_cap before any payment.
+    #[test]
+    fn test_get_remaining_allowance_equals_cap_initially() {
+        let env = Env::default();
+        let (client, _, _, _) = setup(&env);
+        // setup() configures daily_cap = 5_000_000
+        assert_eq!(client.get_remaining_allowance(), 5_000_000, "full cap available initially");
+    }
+
+    /// get_remaining_allowance decreases as payments are made.
+    #[test]
+    fn test_get_remaining_allowance_decreases_with_spend() {
+        let env = Env::default();
+        let (_, agent_sk, vault_id, provider_a) = setup(&env);
+        let client = AgentVaultClient::new(&env, &vault_id);
+
+        let p = BytesN::<32>::random(&env);
+        let s = sign_payload(&env, &agent_sk, &p);
+        let c = Vec::from_array(&env, [transfer_context(&env, &provider_a, 3_000_000)]);
+        env.try_invoke_contract_check_auth::<Error>(&vault_id, &p, s.into_val(&env), &c).unwrap();
+
+        assert_eq!(client.get_remaining_allowance(), 2_000_000, "remaining = cap - spent");
+    }
+
+    /// get_remaining_allowance returns 0 when the cap is exhausted.
+    #[test]
+    fn test_get_remaining_allowance_zero_when_cap_exhausted() {
+        let env = Env::default();
+        let (_, agent_sk, vault_id, provider_a) = setup(&env);
+        let client = AgentVaultClient::new(&env, &vault_id);
+
+        let p = BytesN::<32>::random(&env);
+        let s = sign_payload(&env, &agent_sk, &p);
+        let c = Vec::from_array(&env, [transfer_context(&env, &provider_a, 5_000_000)]);
+        env.try_invoke_contract_check_auth::<Error>(&vault_id, &p, s.into_val(&env), &c).unwrap();
+
+        assert_eq!(client.get_remaining_allowance(), 0, "remaining = 0 when cap fully spent");
+    }
+
+    /// get_remaining_allowance and get_daily_spend together give a consistent view.
+    #[test]
+    fn test_daily_spend_plus_remaining_equals_cap() {
+        let env = Env::default();
+        let (_, agent_sk, vault_id, provider_a) = setup(&env);
+        let client = AgentVaultClient::new(&env, &vault_id);
+
+        let p = BytesN::<32>::random(&env);
+        let s = sign_payload(&env, &agent_sk, &p);
+        let c = Vec::from_array(&env, [transfer_context(&env, &provider_a, 1_234_567)]);
+        env.try_invoke_contract_check_auth::<Error>(&vault_id, &p, s.into_val(&env), &c).unwrap();
+
+        let spend = client.get_daily_spend();
+        let remaining = client.get_remaining_allowance();
+        let cap = client.daily_cap();
+        assert_eq!(spend + remaining, cap, "spend + remaining must equal the cap");
     }
 
     #[test]

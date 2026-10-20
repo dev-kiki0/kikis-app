@@ -31,7 +31,12 @@ function CustomTooltip(props: TooltipContentProps) {
   )
 }
 
-export function VoucherChart() {
+interface VoucherChartProps {
+  /** The active network filter — only sessions on this network are included. */
+  network: 'testnet' | 'mainnet'
+}
+
+export function VoucherChart({ network }: VoucherChartProps) {
   const [data, setData] = useState<ChartPoint[]>([])
   const [loadFailed, setLoadFailed] = useState(false)
 
@@ -39,9 +44,16 @@ export function VoucherChart() {
     const supabase = getSupabaseBrowserClient()
     const { data: rows, error } = await supabase
       .from('public_sessions')
-      .select('opened_at, voucher_count')
+      // Use updated_at so vouchers are attributed to the time they were
+      // issued/updated rather than when the session was opened. A session opened
+      // 2 h ago that issued 50 vouchers over the last 10 min would otherwise
+      // cluster all 50 at the 2-hour-old bucket. (#112)
+      .select('updated_at, voucher_count')
       .not('voucher_count', 'eq', 0)
-      .order('opened_at', { ascending: false })
+      // Filter strictly by the active network so testnet and mainnet vouchers
+      // are never mixed into the same chart. (#112)
+      .eq('network', network)
+      .order('updated_at', { ascending: false })
       .limit(500)
 
     if (error) {
@@ -58,10 +70,11 @@ export function VoucherChart() {
       return
     }
 
-    // Group by minute, cumulative voucher count
+    // Group by minute using updated_at (voucher issuance time) instead of
+    // opened_at (session creation time). (#112)
     const byMinute = new Map<string, number>()
-    for (const row of rows as { opened_at: string; voucher_count: number }[]) {
-      const minute = new Date(row.opened_at).toISOString().slice(0, 16)
+    for (const row of rows as { updated_at: string; voucher_count: number }[]) {
+      const minute = new Date(row.updated_at).toISOString().slice(0, 16)
       byMinute.set(minute, (byMinute.get(minute) ?? 0) + (row.voucher_count ?? 0))
     }
 
@@ -75,7 +88,7 @@ export function VoucherChart() {
       })
 
     setData(points)
-  }, [])
+  }, [network])
 
   useEffect(() => {
     const initialFetch = setTimeout(() => void fetchData(), 0)

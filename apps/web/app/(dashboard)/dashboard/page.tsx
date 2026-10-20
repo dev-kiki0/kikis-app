@@ -127,8 +127,8 @@ export default async function DashboardPage({
           </div>
         </div>
 
-        {/* Voucher chart */}
-        <VoucherChart />
+        {/* Voucher chart — filtered to the active network, bucketed by updated_at (#112) */}
+        <VoucherChart network={network} />
       </main>
     </div>
   )
