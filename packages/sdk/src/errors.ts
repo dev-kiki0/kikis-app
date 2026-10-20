@@ -15,6 +15,7 @@ export type KikisAppErrorCode =
   | 'CLIENT_VERSION_TOO_OLD'
   | 'TRUSTLINE'
   | 'VAULT_CONFIG'
+  | 'SECURITY'
   | 'FEE'
   | 'VAULT_CONFIG'
 
@@ -132,6 +133,14 @@ export class KikisAppVaultConfigError extends KikisAppError {
           (instance as { name?: string }).name === 'NulthConfigError' ||
           (instance as { code?: string }).code === 'VAULT_CONFIG'))
     )
+  }
+}
+
+/** Vault code could not be verified against its configured Wasm hash. */
+export class KikisAppSecurityError extends KikisAppError {
+  constructor(message: string, options: KikisAppErrorOptions = {}) {
+    super(message, 'SECURITY', false, options)
+    this.name = 'KikisAppSecurityError'
   }
 }
 

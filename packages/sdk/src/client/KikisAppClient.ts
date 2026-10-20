@@ -122,6 +122,8 @@ export interface KikisAppClientConfig {
   spendStore?: SpendStore
   /** Structured logger for SDK events. Defaults to no-op (silent). */
   logger?: KikisAppLogger
+  /** Optional Soroban RPC endpoint used by payment and settlement clients. */
+  rpcUrl?: string
   /**
    * Soroban RPC endpoint used for mpp-session settlement (close()'s
    * prepare_commitment simulation and transaction preparation). Defaults to
