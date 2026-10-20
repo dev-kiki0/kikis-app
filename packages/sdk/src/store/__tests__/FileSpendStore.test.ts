@@ -34,6 +34,11 @@ describe('FileSpendStore', () => {
     await store.write(state)
     const read = await store.read()
     assert.deepEqual(read, state)
+
+    if (process.platform !== 'win32') {
+      const fileStat = await fs.stat(filePath)
+      assert.equal(fileStat.mode & 0o777, 0o600)
+    }
   })
 
   it('creates parent directories if they do not exist', async () => {

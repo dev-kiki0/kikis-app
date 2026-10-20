@@ -98,13 +98,16 @@ export class FileSpendStore implements SpendStore {
 
   async write(state: DailySpend): Promise<void> {
     const dir = path.dirname(this.filePath)
-    await fs.mkdir(dir, { recursive: true })
+    await fs.mkdir(dir, { recursive: true, mode: 0o700 })
 
     // A per-process, per-write temp name: concurrent writers sharing one
     // `.tmp` path could rename each other's half-written file into place.
     const tmpPath = `${this.filePath}.${process.pid}.${this.tmpCounter++}.tmp`
     try {
-      await fs.writeFile(tmpPath, JSON.stringify(state, null, 2), 'utf-8')
+      await fs.writeFile(tmpPath, JSON.stringify(state, null, 2), {
+        encoding: 'utf-8',
+        mode: 0o600,
+      })
       // rename is atomic within a filesystem: the target is either the old
       // content or the new content, never a partial write.
       await fs.rename(tmpPath, this.filePath)
