@@ -32,15 +32,33 @@ BEGIN
 END;
 $$;
 
--- ── 2. pg_cron schedule (conditional) ────────────────────────
--- Enable the pg_cron extension if available. Supabase projects ship with
--- it, but local/self-hosted instances may not. CREATE EXTENSION IF NOT
--- EXISTS is safe — it no-ops when the extension is already installed.
+-- ── 2. Idempotent cron registration ──────────────────────────
+-- Registers the daily cleanup job exactly once. Safe to call repeatedly:
+-- if a job with the same name already exists it is left untouched, so
+-- re-running never creates duplicate jobs. Raises a clear error when
+-- pg_cron is not installed so operators know to enable it first.
+--
+-- Operators who enable pg_cron AFTER this migration ran can install the
+-- job without replaying old migrations by calling:
+--
+--   SELECT schedule_settlement_retention();
+--
+-- This is idempotent — invoking it twice still yields exactly one job.
 
-DO $$
+CREATE OR REPLACE FUNCTION schedule_settlement_retention()
+RETURNS void
+LANGUAGE plpgsql
+AS $$
 BEGIN
-  -- Only proceed if pg_cron is installed.
-  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    RAISE EXCEPTION
+      'pg_cron is not installed; enable it (CREATE EXTENSION pg_cron) before scheduling settlement retention';
+  END IF;
+
+  -- Only schedule if the job does not already exist (idempotent).
+  IF NOT EXISTS (
+    SELECT 1 FROM cron.job WHERE jobname = 'settlement-retention-cleanup'
+  ) THEN
     -- Schedule daily cleanup at 03:00 UTC.
     -- cron.schedule(job_name, schedule, command)
     PERFORM cron.schedule(
@@ -49,9 +67,26 @@ BEGIN
       'SELECT cleanup_stale_settlements(7)'
     );
   END IF;
+END;
+$$;
+
+-- ── 3. pg_cron schedule (conditional) ────────────────────────
+-- Enable the pg_cron extension if available. Supabase projects ship with
+-- it, but local/self-hosted instances may not. CREATE EXTENSION IF NOT
+-- EXISTS is safe — it no-ops when the extension is already installed.
+-- When pg_cron is absent we skip silently; the manual cleanup function
+-- above remains available and the job can be installed later via
+-- schedule_settlement_retention().
+
+DO $$
+BEGIN
+  -- Only proceed if pg_cron is installed.
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    PERFORM schedule_settlement_retention();
+  END IF;
 END $$;
 
--- ── 3. tx_log retention policy ───────────────────────────────
+-- ── 4. tx_log retention policy ───────────────────────────────
 -- tx_log is an audit ledger — append-only by design. Every settlement,
 -- channel open, channel close, and policy rejection is recorded here.
 -- Unlike settlements, tx_log is never cleaned up: it is the permanent

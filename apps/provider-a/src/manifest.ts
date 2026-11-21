@@ -1,18 +1,13 @@
 import type { KikisAppManifest } from '@kikis-app/kikis-app'
+import {
+  TESTNET_USDC_CONTRACT,
+  USDC_ISSUERS,
+  HORIZON_URLS,
+  type Network,
+} from '@kikis-app/stellar-network-constants'
 
-export const TESTNET_USDC_CONTRACT = 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA'
-
-export const USDC_ISSUERS = {
-  testnet: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
-  mainnet: 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN',
-} as const
-
-export const HORIZON_URLS = {
-  testnet: 'https://horizon-testnet.stellar.org',
-  mainnet: 'https://horizon.stellar.org',
-} as const
-
-export type Network = keyof typeof USDC_ISSUERS
+export { TESTNET_USDC_CONTRACT, USDC_ISSUERS, HORIZON_URLS }
+export type { Network }
 
 export const X402_PRICE = '0.001'
 export const MPP_CHARGE_PRICE = '0.0008'

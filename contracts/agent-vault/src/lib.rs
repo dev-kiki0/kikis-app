@@ -148,6 +148,7 @@ impl AgentVault {
         authorized_token: Address,
     ) {
         validate_cap(&env, daily_cap);
+        validate_cap(&env, lifetime_cap);
         for (_, sub_cap) in allowlist.iter() {
             validate_cap(&env, sub_cap);
         }
@@ -312,6 +313,7 @@ impl AgentVault {
             .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized));
         admin.require_auth();
         bump_instance(&env);
+        validate_cap(&env, new_cap);
         let old_cap: i128 = storage.get(&LIFETIME_CAP_KEY).unwrap_or(0);
         storage.set(&LIFETIME_CAP_KEY, &new_cap);
         env.events().publish(
@@ -606,6 +608,35 @@ impl AgentVault {
             .instance()
             .get(&TOKEN_KEY)
             .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized))
+    }
+
+    /// Return the current admin address (read-only). View function for monitoring
+    /// and multisig governance scripts to query who controls the vault.
+    pub fn admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized))
+    }
+
+    /// Return the pending admin address if one has been proposed, None otherwise
+    /// (read-only). Used by governance and operational monitoring.
+    pub fn pending_admin(env: Env) -> Option<Address> {
+        env.storage()
+            .instance()
+            .get(&PENDING_ADMIN_KEY)
+    }
+
+    /// Return whether the contract is frozen (read-only). Frozen vaults reject
+    /// all payments in `__check_auth` and `record_session_settlement`. Used by
+    /// monitoring tools and governance to verify emergency pause state.
+    pub fn is_frozen(env: Env) -> bool {
+        env.storage().instance().get(&FROZEN_KEY).unwrap_or(false)
+    }
+
+    /// Return the lifetime spend cap in stroops (read-only). 0 = unlimited.
+    pub fn lifetime_cap(env: Env) -> i128 {
+        env.storage().instance().get(&LIFETIME_CAP_KEY).unwrap_or(0)
     }
 }
 

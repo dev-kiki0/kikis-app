@@ -26,10 +26,8 @@ export function prepareHttpRequestInit(
   if (requestOptions?.body !== undefined && requestOptions?.body !== null) {
     if (typeof requestOptions.body === 'string') {
       body = requestOptions.body
-    } else if (
-      requestOptions.body instanceof Uint8Array ||
-      (typeof Buffer !== 'undefined' && Buffer.isBuffer(requestOptions.body))
-    ) {
+    } else if (requestOptions.body instanceof Uint8Array) {
+      // Node Buffers extend Uint8Array, so they take this branch too.
       body = requestOptions.body as unknown as BodyInit
     } else if (typeof requestOptions.body === 'object') {
       body = JSON.stringify(requestOptions.body)

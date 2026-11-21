@@ -30,6 +30,14 @@ describe('formatRelativeTime', () => {
 
     expect(formatRelativeTime('2026-09-26T00:00:05.000Z', now)).toBe('0s ago')
   })
+
+  it('#given a malformed timestamp #when formatting #then it returns the fallback instead of throwing', () => {
+    const now = Date.parse('2026-09-26T00:00:00.000Z')
+
+    expect(() => formatRelativeTime('not-a-date', now)).not.toThrow()
+    expect(formatRelativeTime('not-a-date', now)).toBe('unknown time')
+    expect(formatRelativeTime('', now)).toBe('unknown time')
+  })
 })
 
 describe('subscribeNow', () => {
@@ -38,9 +46,14 @@ describe('subscribeNow', () => {
     const now = new Date('2026-09-26T00:00:00.000Z')
     vi.setSystemTime(now)
 
-    const calls: number[] = []
-    const unsubscribeA = subscribeNow(() => calls.push(getNow()))
-    const unsubscribeB = subscribeNow(() => calls.push(getNow()))
+    let callsA = 0
+    let callsB = 0
+    const unsubscribeA = subscribeNow(() => {
+      callsA += 1
+    })
+    const unsubscribeB = subscribeNow(() => {
+      callsB += 1
+    })
 
     expect(vi.getTimerCount()).toBe(1)
     expect(getNow()).toBe(now.getTime())
@@ -48,9 +61,17 @@ describe('subscribeNow', () => {
     vi.advanceTimersByTime(15_000)
 
     expect(getNow()).toBe(now.getTime() + 15_000)
-    expect(calls.length).toBeGreaterThan(0)
+    expect(callsA).toBe(1)
+    expect(callsB).toBe(1)
 
     unsubscribeA()
+    vi.advanceTimersByTime(15_000)
+
+    expect(getNow()).toBe(now.getTime() + 30_000)
+    expect(callsA).toBe(1)
+    expect(callsB).toBe(2)
+    expect(vi.getTimerCount()).toBe(1)
+
     unsubscribeB()
 
     expect(vi.getTimerCount()).toBe(0)

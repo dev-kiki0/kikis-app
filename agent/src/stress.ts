@@ -46,8 +46,28 @@ const AGENT_SECRET = process.env['AGENT_SECRET'] ?? ''
 const COMMITMENT_SECRET = process.env['COMMITMENT_SECRET'] ?? ''
 const PROVIDER_A_URL = (process.env['PROVIDER_A_URL'] ?? 'http://localhost:3001').replace(/\/$/, '')
 const PROVIDER_B_URL = (process.env['PROVIDER_B_URL'] ?? 'http://localhost:3002').replace(/\/$/, '')
-const CONCURRENT_AGENTS = parseInt(process.env['CONCURRENT_AGENTS'] ?? '50', 10)
-const PAYMENTS_PER_SESSION = parseInt(process.env['PAYMENTS_PER_SESSION'] ?? '10', 10)
+
+/**
+ * Read a positive whole-count setting from the environment. Unset values fall
+ * back to `defaultValue`; anything else must be a run of digits greater than
+ * zero. Invalid input fails fast, naming the setting, before any provider call.
+ */
+export function readPositiveCount(
+  name: string,
+  defaultValue: number,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = env[name]
+  if (raw === undefined) return defaultValue
+  if (!/^\d+$/.test(raw) || Number(raw) <= 0) {
+    logError(`${name} must be a positive whole number, got "${raw}"`)
+    process.exit(1)
+  }
+  return Number(raw)
+}
+
+const CONCURRENT_AGENTS = readPositiveCount('CONCURRENT_AGENTS', 50)
+const PAYMENTS_PER_SESSION = readPositiveCount('PAYMENTS_PER_SESSION', 10)
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type Phase =

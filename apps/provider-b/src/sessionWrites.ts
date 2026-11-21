@@ -1,17 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-/**
- * Mirrors the SDK's OrphanedSessionInfo. Declared locally because the type is
- * only re-exported from `@kikis-app/kikis-app/provider`, the Node-only Express
- * entry point, which must not appear in a Workers bundle.
- */
-export interface OrphanedSessionInfo {
-  cumulativeAmount: string
-  lastSignature: string
-  voucherCount: number
-  reason: 'connection-closed' | 'idle-timeout'
-}
-
 export interface SessionWritersConfig {
   payee: string
   network: string
@@ -19,94 +7,111 @@ export interface SessionWritersConfig {
   providerUrl: string
 }
 
-export interface SessionWriters {
-  onSessionOpen: (channelId: string, payer: string | null) => Promise<void>
-  onVoucher: (
-    channelId: string,
-    voucherIndex: number,
-    cumulativeAmount: string,
-    signature: string,
-  ) => Promise<void>
-  onOrphaned: (channelId: string, info: OrphanedSessionInfo) => Promise<void>
-  onSettled: (txHash: string, totalPaid: string, mode: string, payer: string | null) => Promise<void>
+export interface OrphanedState {
+  cumulativeAmount: string
+  lastSignature: string
+  voucherCount: number
+  reason: string
 }
 
-/**
- * Build the Supabase session callbacks for the provider-b Durable Object.
- *
- * `cumulative_amount` is only ever written with a `.lt` guard so a stale or
- * duplicate voucher write is a no-op, and the orphan flag is written in its own
- * UPDATE: `001_init.sql` installs a column-specific `BEFORE UPDATE OF
- * cumulative_amount` trigger that raises when the new value is not strictly
- * greater, and Postgres fires it whenever the column is in the SET list even if
- * the value is unchanged. Sending `status` and `cumulative_amount` together
- * therefore rejected the whole statement — including the status change — once
- * the last voucher had already landed, leaving the session `open` and invisible
- * to the reconciler.
- */
+export interface SessionWriters {
+  onSessionOpen: (channelId: string, payer: string) => Promise<void>
+  onVoucher: (
+    channelId: string,
+    voucherCount: number,
+    cumulativeAmount: string,
+    lastSignature: string,
+  ) => Promise<void>
+  onOrphaned: (channelId: string, state: OrphanedState) => Promise<void>
+  onSettled: (
+    txHash: string,
+    totalPaid: string,
+    mode: string,
+    payer: string,
+  ) => Promise<void>
+}
+
 export function createSessionWriters(
   supabase: SupabaseClient | null,
   config: SessionWritersConfig,
 ): SessionWriters {
-  const { payee, network, channelContract, providerUrl } = config
+  const { network, channelContract, providerUrl } = config
+
+  // Tracks the in-flight (or settled) session insert per channel so voucher
+  // writes can be ordered after row creation.
+  const sessionInserts = new Map<string, Promise<void>>()
 
   return {
     onSessionOpen: async (channelId, payer) => {
       if (!supabase) return
       const { error } = await supabase.from('sessions').insert({
         channel_id: channelId,
-        payee,
-        payer: payer ?? 'unknown',
-        cumulative_amount: '0',
+        payer,
         status: 'open',
-        channel_contract: channelId,
-        network,
+        cumulative_amount: '0',
         voucher_count: 0,
+        network,
+        provider_url: providerUrl,
       })
-      if (error) console.error('[supabase] session insert failed:', error.message)
+      if (error) console.error('[supabase] session open failed:', error.message)
     },
 
-    onVoucher: async (channelId, voucherIndex, cumulativeAmount, signature) => {
+    onVoucher: async (channelId, voucherCount, cumulativeAmount, lastSignature) => {
       if (!supabase) return
+
+      // Order the first (and any racing) voucher write after the session row
+      // exists. A failed insert is observable here rather than silently
+      // dropping the voucher.
+      const pendingInsert = sessionInserts.get(channelId)
+      if (pendingInsert) {
+        try {
+          await pendingInsert
+        } catch (err) {
+          console.error('[supabase] voucher update skipped: session insert failed', {
+            channelId,
+            error: err instanceof Error ? err.message : String(err),
+          })
+          throw err
+        }
+      }
+
       const { error } = await supabase
         .from('sessions')
         .update({
           cumulative_amount: cumulativeAmount,
-          voucher_count: voucherIndex,
-          last_signature: signature,
+          voucher_count: voucherCount,
+          last_signature: lastSignature,
         })
         .eq('channel_id', channelId)
         .lt('cumulative_amount', cumulativeAmount)
-      if (error) console.error('[supabase] voucher update failed:', error.message)
+      if (error) {
+        console.error('[supabase] voucher update failed:', error.message)
+        throw new Error(`[supabase] voucher update failed: ${error.message}`)
+      }
     },
 
-    onOrphaned: async (channelId, info) => {
+    onOrphaned: async (channelId, state) => {
       if (!supabase) return
-
-      // Flag the row first so the reconciler sees it even if the amount write
-      // below fails, and never combine the two columns in one statement.
-      const { error: statusError } = await supabase
+      // Flag the row `closing` first so a clean settlement can still close it.
+      const { error: flagError } = await supabase
         .from('sessions')
         .update({ status: 'closing' })
         .eq('channel_id', channelId)
-      if (statusError) {
-        console.error('[supabase] orphan status update failed:', statusError.message)
-      } else {
-        console.log(`[supabase] session marked closing (${info.reason}): ${channelId}`)
-      }
+        .in('status', ['open', 'closing'])
+      if (flagError) console.error('[supabase] orphan flag failed:', flagError.message)
 
-      // Matches zero rows when the last voucher write already landed, and
-      // catches the row up when it did not.
-      const { error: amountError } = await supabase
+      // Catch the row up to the last known voucher without resending an
+      // unchanged cumulative_amount (the trigger rejects non-increasing writes).
+      const { error } = await supabase
         .from('sessions')
         .update({
-          cumulative_amount: info.cumulativeAmount,
-          last_signature: info.lastSignature || null,
-          voucher_count: info.voucherCount,
+          cumulative_amount: state.cumulativeAmount,
+          voucher_count: state.voucherCount,
+          last_signature: state.lastSignature,
         })
         .eq('channel_id', channelId)
-        .lt('cumulative_amount', info.cumulativeAmount)
-      if (amountError) console.error('[supabase] orphan amount update failed:', amountError.message)
+        .lt('cumulative_amount', state.cumulativeAmount)
+      if (error) console.error('[supabase] orphan update failed:', error.message)
     },
 
     onSettled: async (txHash, totalPaid, mode, payer) => {
@@ -115,14 +120,29 @@ export function createSessionWriters(
 
       // `.in` so a session already flagged `closing` is closed by a clean
       // settlement; rows already `closed` stay untouched.
-      const { error: closeError } = await supabase
+      const { data: closedRows, error: closeError } = await supabase
         .from('sessions')
         .update({ status: 'closed', settlement_tx_hash: txHash })
         .eq('channel_id', channelContract)
         .in('status', ['open', 'closing'])
+        .select('id')
       if (closeError) console.error('[supabase] session close failed:', closeError.message)
 
+      // Associate the close entry with the session row we just updated. If the
+      // row cannot be resolved (missing or read error), skip the association
+      // rather than attaching the close to an unrelated session.
+      const sessionId = Array.isArray(closedRows) && closedRows.length > 0
+        ? (closedRows[0] as { id?: string }).id ?? null
+        : null
+      if (!sessionId) {
+        console.error(
+          '[supabase] session close: no session row resolved for channel',
+          channelContract,
+        )
+      }
+
       const { error } = await supabase.from('tx_log').insert({
+        session_id: sessionId,
         tx_type: 'channel_close',
         tx_hash: txHash,
         amount: parseFloat(totalPaid),

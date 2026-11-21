@@ -62,6 +62,16 @@ export interface NulthAuthSignature {
   proof: NulthProof
 }
 
+/**
+ * Supported log sink shapes for Nulth warnings.
+ *
+ * Either a callable sink receiving `(level, message)`, or an object exposing
+ * a `warn(message)` method. Any other shape is rejected by TypeScript.
+ */
+export type NulthLogger =
+  | ((level: 'warn', message: string) => void)
+  | { warn(message: string): void }
+
 export interface NulthClientConfig {
   /** Nulth smart account contract address (C...) — the payer */
   nulthAccount: string
@@ -76,7 +86,7 @@ export interface NulthClientConfig {
   /** Optional verifier contract deployed alongside the Nulth account */
   verifierContract?: string
   /** Optional log sink for the mock-prover warning. */
-  logger?: any
+  logger?: NulthLogger
 }
 
 /**

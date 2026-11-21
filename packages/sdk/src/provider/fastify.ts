@@ -402,7 +402,12 @@ export const kikisAppFastify: FastifyPluginAsync<KikisAppFastifyOptions> = async
   })
 
   // Expose the signed manifest at a well-known route
-  fastify.get('/.well-known/kikis-app.json', async (_request, reply) => {
+  fastify.get('/.well-known/kikis-app.json', async (request, reply) => {
+    // Only serve manifest for exact path match; ignore query parameters
+    const pathname = new URL(request.url, 'http://placeholder').pathname
+    if (pathname !== '/.well-known/kikis-app.json') {
+      return reply.code(404).send()
+    }
     const signed = await signManifest(manifest, payeeSecretKey)
     return reply.code(200).send(signed)
   })

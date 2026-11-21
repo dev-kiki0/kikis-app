@@ -21,6 +21,15 @@ export function formatMppError(error: unknown): string {
   }
 }
 
+function formatMppDetails(details: unknown): string {
+  try {
+    const serialized = JSON.stringify(details)
+    return serialized === undefined ? String(details) : serialized
+  } catch {
+    return formatMppError(details)
+  }
+}
+
 export function withTypedChannelErrors(method: Method.AnyServer): Method.AnyServer {
   return {
     ...method,
@@ -70,7 +79,7 @@ function mapChannelError(error: unknown): Error {
     ? (error as { details?: Record<string, unknown> }).details
     : undefined
   const reason = details && Object.keys(details).length > 0
-    ? `${message} (${JSON.stringify(details)})`
+    ? `${message} (${formatMppDetails(details)})`
     : message
 
   if (/signer mismatch|authori[sz]er|unauthori[sz]ed/i.test(message)) {

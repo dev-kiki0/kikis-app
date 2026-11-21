@@ -38,13 +38,20 @@ export class SupabaseSessionStore implements SessionStore {
     }
     if (!data) return null
 
+    // PostgREST deserializes NUMERIC as a JavaScript number. Keep it as a string
+    // representation to preserve decimal precision for the .lt() comparison in upsert.
+    const cumulativeAmountStr =
+      typeof data.cumulative_amount === 'string'
+        ? data.cumulative_amount
+        : String(data.cumulative_amount)
+
     return {
       channel_id: data.channel_id as string,
       payee: data.payee as string,
       payer: data.payer as string,
       channel_contract: data.channel_contract as string,
       network: data.network as SessionState['network'],
-      cumulative_amount: String(data.cumulative_amount),
+      cumulative_amount: cumulativeAmountStr,
       last_signature: data.last_signature as string,
       status: data.status as SessionState['status'],
       opened_at: data.opened_at as string,

@@ -35,6 +35,10 @@ pnpm verify          # build + typecheck + tests + provider bundles
 pnpm verify --fast   # build + typecheck only
 ```
 
+Those are the only two accepted forms. Any other argument — a misspelled
+flag, an extra argument, or `--fast` in a position it does not belong — is
+rejected with a usage message and a nonzero exit before any checks run.
+
 A **pre-push hook** runs `pnpm verify --fast` automatically. It is installed by
 `pnpm install` (via `prepare`, which sets `core.hooksPath`), so you get it
 without doing anything. Bypass with `git push --no-verify` when you need to.
@@ -50,21 +54,23 @@ someone else's problem.
 If you would rather run the steps individually:
 
 ```bash
-# 1. Types across every package
+# 1. Build the SDK packages first — consumers resolve their dist/ output
+pnpm --filter @kikis-app/nulth-sdk build
+pnpm --filter @kikis-app/kikis-app build
+
+# 2. Types across every package
 pnpm -r typecheck
 
-# 2. Tests
+# 3. Tests
 pnpm --filter @kikis-app/kikis-app test
 pnpm --filter @kikis-app/mcp-server test
 pnpm --filter provider-a test
 pnpm --filter provider-b test
 
-# 3. Builds — for the two providers this bundles a real Workers script
-pnpm --filter @kikis-app/nulth-sdk build
-pnpm --filter @kikis-app/kikis-app build
+# 4. Remaining builds — for the two providers this bundles a real Workers script
 pnpm -r --filter '!@kikis-app/nulth-sdk' --filter '!@kikis-app/kikis-app' build
 
-# 4. Contracts, only if you touched contracts/
+# 5. Contracts, only if you touched contracts/
 cargo test --manifest-path contracts/agent-vault/Cargo.toml
 cargo test --manifest-path contracts/agent-vault/Cargo.toml --features testutils
 ```
@@ -118,7 +124,13 @@ These are enforced in review, not by a linter, so please self-check:
 
 Follow the existing style: `#given` / `#when` / `#then` comments, one logical assertion per test, descriptive names. Cover the failure path, not just the happy one.
 
-Note that provider tests currently only validate manifest shape. If your change touches the payment path, say on the PR how you verified it — a `curl` against `pnpm dev` showing the 402 challenge is worth more than a green unit test here.
+The provider `test` script (`tsx --test "src/**/*.test.ts"`) discovers more than manifest shape. It also runs the Worker request tests and the session-writer / Durable Object recovery tests, so request and settlement changes have local coverage:
+
+- **Manifest shape** — `apps/provider-*/src/manifest.test.ts` validates the manifest against the schema with `ajv`.
+- **Worker request behavior** — the `*.test.ts` files under `apps/provider-*/src/` exercise the request handler (challenge, verification, and error paths) against the Worker entrypoint.
+- **Session writer / Durable Object recovery** — the `ChannelSession` and session-writer tests cover persistence and recovery of in-flight sessions.
+
+Run them with `pnpm --filter provider-a test` (or `provider-b`). These are local checks only: they do not touch a live Stellar account or settle real payments. If your change touches the payment path, say on the PR how you verified it — a `curl` against `pnpm dev` showing the 402 challenge is worth more than a green unit test here.
 
 ## Opening a PR
 

@@ -93,6 +93,79 @@ describe('startOrderbookPush — timer teardown on broken sockets', () => {
     await delay(30)
     assert.equal(fetches, 0)
   })
+
+  it('does not start overlapping fetches while a snapshot is pending', async () => {
+    const sent: string[] = []
+    const socket = {
+      readyState: 1,
+      send: (data: string) => {
+        sent.push(data)
+      },
+    }
+
+    let fetches = 0
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const pusher = startOrderbookPush(
+      socket,
+      async () => {
+        fetches++
+        await gate
+        return { seq: fetches }
+      },
+      10,
+    )
+
+    // Advance several interval ticks while the first fetch is still pending.
+    await delay(45)
+    assert.equal(fetches, 1, 'only one fetch may be in flight at a time')
+    assert.equal(sent.length, 0, 'nothing is sent until the pending fetch resolves')
+
+    release()
+    await delay(5)
+    assert.equal(sent.length, 1, 'the resolved snapshot is sent exactly once')
+    assert.equal(JSON.parse(sent[0]!).seq, 1)
+
+    // After completion the next scheduled poll may run again.
+    await delay(30)
+    pusher.stop()
+    assert.ok(fetches >= 2, 'polling resumes after the pending fetch completes')
+  })
+
+  it('blocks post-stop sends and further polling', async () => {
+    const sent: string[] = []
+    const socket = {
+      readyState: 1,
+      send: (data: string) => {
+        sent.push(data)
+      },
+    }
+
+    let fetches = 0
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const pusher = startOrderbookPush(
+      socket,
+      async () => {
+        fetches++
+        await gate
+        return { seq: fetches }
+      },
+      10,
+    )
+
+    await delay(5)
+    pusher.stop()
+    release()
+    await delay(30)
+
+    assert.equal(fetches, 1, 'no further fetches after stop()')
+    assert.equal(sent.length, 0, 'a snapshot resolving after stop() must not be sent')
+  })
 })
 
 describe('ChannelSession — reconciliation mutex', () => {

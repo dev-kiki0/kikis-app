@@ -32,10 +32,10 @@ body:
     id: network
     attributes:
       label: Network
-      description: Which Stellar network are you targeting?
+      description: Which Stellar network are you targeting? Use the SDK configuration spelling (testnet or mainnet), not the CAIP network identifier.
       options:
         - "testnet"
-        - "pubnet"
+        - "mainnet"
     validations:
       required: true
   - type: input
