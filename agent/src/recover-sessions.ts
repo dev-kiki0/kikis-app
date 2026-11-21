@@ -185,12 +185,12 @@ async function main(): Promise<void> {
     }
 
     console.log()
-    if (stats.recoveredCount > 0) {
-      console.log('[SessionRecovery] ✓ Session recovery completed successfully')
-      process.exit(0)
-    } else if (stats.failedCount > 0) {
+    if (stats.failedCount > 0) {
       console.log('[SessionRecovery] ✗ Session recovery completed with errors')
       process.exit(1)
+    } else if (stats.recoveredCount > 0) {
+      console.log('[SessionRecovery] ✓ Session recovery completed successfully')
+      process.exit(0)
     } else {
       console.log('[SessionRecovery] ✓ No orphaned sessions found')
       process.exit(0)

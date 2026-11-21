@@ -66,19 +66,42 @@ export function useSession(url: string, options?: UseSessionOptions): UseSession
     }
   }, [options?.noCloseOnUnmount])
 
-  const open = useCallback(
-    async (): Promise<SessionHandle | null> => {
-      setStatus('opening')
-      setError(null)
-      try {
-        // Extract session options, excluding React hook-specific flags
-        const { noCloseOnUnmount, ...sessionOptions } = options ?? {}
-        const s = await client.openSession(url, sessionOptions)
-        sessionRef.current = s
-        // Subscribe to per-voucher updates so vouchers/cumulative move in real
-        // time during streaming instead of staying at their initial zeros until
-        // close() resolves (#15). A previous session's listener (if any) is
-        // detached before attaching the new one.
+  const open = useCallback(async (): Promise<SessionHandle | null> => {
+    // Prevent concurrent opens from overwriting the active session. If already
+    // opening or open, return the existing handle to avoid listener replacement.
+    if (status === 'opening' || status === 'open') {
+      return sessionRef.current
+    }
+    setStatus('opening')
+    setError(null)
+    try {
+      const s = await client.openSession(url)
+      // Another open() may have completed while we were waiting for this one.
+      // Only apply the result if we're still the owner (no one else opened).
+      if (sessionRef.current && sessionRef.current !== s) {
+        s.close().catch(() => {
+          /* race-condition fallback close */
+        })
+        return sessionRef.current
+      }
+      sessionRef.current = s
+      // Subscribe to per-voucher updates so vouchers/cumulative move in real
+      // time during streaming instead of staying at their initial zeros until
+      // close() resolves (#15). A previous session's listener (if any) is
+      // detached before attaching the new one.
+      unsubscribeRef.current?.()
+      unsubscribeRef.current = s.on('session:voucher', (payload) => {
+        if (!mountedRef.current) return
+        setVouchers(payload.vouchersIssued)
+        setCumulative(payload.currentCumulative)
+      })
+      // Subscribe to lifecycle events so a background wall-clock timeout or a
+      // failed auto-close is reflected in React state instead of leaving the
+      // UI stuck on status === 'open' (#87).
+      unsubscribeLifecycleRef.current?.()
+      const offTimeout = s.on('session:timeout', () => {
+        if (!mountedRef.current) return
+        sessionRef.current = null
         unsubscribeRef.current?.()
         unsubscribeRef.current = s.on('session:voucher', (payload) => {
           if (!mountedRef.current) return
@@ -131,9 +154,9 @@ export function useSession(url: string, options?: UseSessionOptions): UseSession
         }
         return null
       }
-    },
-    [client, url, options],
-  )
+      return null
+    }
+  }, [client, url, status])
 
   const close = useCallback(async (): Promise<SessionCloseResult | null> => {
     const s = sessionRef.current

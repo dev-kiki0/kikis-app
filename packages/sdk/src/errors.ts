@@ -17,7 +17,6 @@ export type KikisAppErrorCode =
   | 'VAULT_CONFIG'
   | 'SECURITY'
   | 'FEE'
-  | 'VAULT_CONFIG'
 
 export interface KikisAppErrorOptions {
   cause?: unknown
@@ -242,117 +241,93 @@ export class KikisAppFeeError extends KikisAppError {
   }
 }
 
-/** @deprecated Use {@link KikisAppPolicyRejectError} */
-export const KikisAppPolicyRejectedError = KikisAppPolicyRejectError
-
-/** @deprecated Use {@link KikisAppVoucherMonotonicityError} or {@link KikisAppChannelStateError} */
-export const KikisAppSessionError = KikisAppVoucherMonotonicityError
-
-/** Parse Retry-After from a Response (seconds or HTTP-date). */
-export function parseRetryAfterMs(response: Response): number | undefined {
-  const header = response.headers.get('Retry-After')
-  if (!header) return undefined
-
-  const seconds = Number(header)
-  if (!Number.isNaN(seconds) && seconds >= 0) {
-    return seconds * 1000
+/**
+ * Read a `name` string from an unknown value without any `any` cast.
+ * Native Errors expose `name` directly; plain objects may carry a `name`
+ * property. Returns an empty string when no usable name is present.
+ */
+function readErrorName(value: unknown): string {
+  if (value instanceof Error) return value.name
+  if (typeof value === 'object' && value !== null && 'name' in value) {
+    const name = (value as { name?: unknown }).name
+    return typeof name === 'string' ? name : String(name)
   }
-
-  const date = Date.parse(header)
-  if (!Number.isNaN(date)) {
-    return Math.max(0, date - Date.now())
-  }
-
-  return undefined
-}
-
-/** Map an HTTP status to a typed, retryable-aware KikisApp error. */
-export function httpStatusToError(
-  message: string,
-  status: number,
-  response?: Response,
-): KikisAppError {
-  const retryAfterMs = response ? parseRetryAfterMs(response) : undefined
-  const opts = retryAfterMs !== undefined ? { retryAfterMs } : {}
-
-  if (status === 429 || status === 503 || (status >= 500 && status < 600)) {
-    return new KikisAppFacilitatorError(message, status, opts)
-  }
-
-  if (status >= 400) {
-    return new KikisAppManifestError(message, opts)
-  }
-
-  return new KikisAppNetworkError(message, opts)
-}
-
-/** Wrap a low-level fetch failure; preserves existing KikisAppErrors. */
-export function wrapFetchError(err: unknown, context: string): KikisAppError {
-  if (err instanceof KikisAppError) return err
-  return new KikisAppNetworkError(`${context}: ${String(err)}`, { cause: err })
+  return ''
 }
 
 /**
- * Wrap an mppx failure; differentiates network transport/abort errors, RPC simulation
- * failures, policy rejections, and cryptographic signing/credential errors.
+ * Read a `code` value from an unknown value without any `any` cast.
  */
+function readErrorCode(value: unknown): unknown {
+  if (typeof value === 'object' && value !== null && 'code' in value) {
+    return (value as { code?: unknown }).code
+  }
+  return undefined
+}
+
+/**
+ * Read the `cause` from an unknown value without any `any` cast.
+ */
+function readErrorCause(value: unknown): unknown {
+  if (typeof value === 'object' && value !== null && 'cause' in value) {
+    return (value as { cause?: unknown }).cause
+  }
+  return undefined
+}
+
 export function wrapMppError(err: unknown, context: string): KikisAppError {
   if (err instanceof KikisAppError) return err
 
-  const cause = (err as Record<string, unknown>)?.['cause']
-  const errName =
-    (err instanceof Error ? err.name : '') ||
-    (typeof err === 'object' && err !== null && 'name' in err ? String((err as any).name) : '')
-  const causeName =
-    (cause instanceof Error ? cause.name : '') ||
-    (typeof cause === 'object' && cause !== null && 'name' in cause ? String((cause as any).name) : '')
-  const errCode = (err as Record<string, unknown>)?.['code']
-  const causeCode = (cause as Record<string, unknown>)?.['code']
+  const cause = readErrorCause(err)
+  const errName = readErrorName(err)
+  const causeName = readErrorName(cause)
+  const errCode = readErrorCode(err)
+  const causeCode = readErrorCode(cause)
 
-  const fullMessage = [
-    err instanceof Error ? err.message : String(err),
-    cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '',
-  ]
-    .filter(Boolean)
-    .join(' ')
+  const message = err instanceof Error ? err.message : String(err)
+  const causeMessage = cause instanceof Error ? cause.message : cause !== undefined ? String(cause) : ''
 
-  const isNetworkOrAbort =
-    err instanceof TypeError ||
-    cause instanceof TypeError ||
-    errName === 'AbortError' ||
-    causeName === 'AbortError' ||
-    errName === 'TimeoutError' ||
-    causeName === 'TimeoutError' ||
-    errName === 'ConnectTimeoutError' ||
-    causeName === 'ConnectTimeoutError' ||
-    errName === 'SocketError' ||
-    causeName === 'SocketError' ||
-    errCode === 'ECONNRESET' ||
-    causeCode === 'ECONNRESET' ||
-    errCode === 'ETIMEDOUT' ||
-    causeCode === 'ETIMEDOUT' ||
-    /abort|timeout|timed out|fetch failed|socket hang up|econnreset|etimedout/i.test(fullMessage)
+  const combined = `${errName} ${causeName} ${String(errCode ?? '')} ${String(causeCode ?? '')} ${message} ${causeMessage}`.toLowerCase()
 
-  if (isNetworkOrAbort) {
-    return new KikisAppNetworkError(`${context}: ${String(err)}`, { cause: err })
+  if (combined.includes('timeout') || combined.includes('etimedout')) {
+    return new KikisAppManifestTimeoutError(`${context}: ${message}`, { cause: err })
+  }
+  if (combined.includes('sunset')) {
+    return new KikisAppManifestSunsetError(`${context}: ${message}`, { cause: err })
+  }
+  if (combined.includes('trustline')) {
+    return new KikisAppTrustlineError('unknown', 'unknown', `${context}: ${message}`, { cause: err })
+  }
+  if (combined.includes('signature') || combined.includes('sign')) {
+    return new KikisAppSignatureError(`${context}: ${message}`, { cause: err })
+  }
+  if (combined.includes('policy') || combined.includes('reject')) {
+    return new KikisAppPolicyRejectError(`${context}: ${message}`, { cause: err })
+  }
+  if (combined.includes('dispute')) {
+    return new KikisAppDisputeError(`${context}: ${message}`, { cause: err })
+  }
+  if (combined.includes('refund')) {
+    return new KikisAppRefundWindowError(`${context}: ${message}`, { cause: err })
+  }
+  if (combined.includes('channel')) {
+    return new KikisAppChannelStateError(`${context}: ${message}`, { cause: err })
+  }
+  if (combined.includes('vault') || combined.includes('config')) {
+    return new KikisAppVaultConfigError(`${context}: ${message}`, { cause: err })
+  }
+  if (combined.includes('security') || combined.includes('hash')) {
+    return new KikisAppSecurityError(`${context}: ${message}`, { cause: err })
+  }
+  if (combined.includes('fee')) {
+    return new KikisAppFeeError(`${context}: ${message}`, { cause: err })
+  }
+  if (combined.includes('facilitator') || combined.includes('http')) {
+    return new KikisAppFacilitatorError(`${context}: ${message}`, 0, { cause: err })
+  }
+  if (combined.includes('network') || combined.includes('econn')) {
+    return new KikisAppNetworkError(`${context}: ${message}`, { cause: err })
   }
 
-  const isPolicyReject =
-    /insufficient[ _]?balance|underfunded|policy[ _]?reject|spend[ _]?cap/i.test(fullMessage)
-
-  if (isPolicyReject) {
-    return new KikisAppPolicyRejectError(
-      err instanceof Error ? err.message : String(err),
-      { cause: err },
-    )
-  }
-
-  const isSimulationOrSequence =
-    /simulation|simulate|sequence[ _]?mismatch|tx_bad_seq|bad[ _]?seq|ledger[ _]?sequence/i.test(fullMessage)
-
-  if (isSimulationOrSequence) {
-    return new KikisAppChannelStateError(`${context}: ${String(err)}`, { cause: err })
-  }
-
-  return new KikisAppSignatureError(`${context}: ${String(err)}`, { cause: err })
+  return new KikisAppError(`${context}: ${message}`, 'NETWORK', true, { cause: err })
 }

@@ -153,12 +153,31 @@ async function runTests(): Promise<void> {
   // ── Test 2: MPP charge query ───────────────────────────────────────────────
   log('mpp-charge', 'Running MPP charge query test...')
 
-  const chargeResult = await client.pay(`${PROVIDER_A_URL}/price`)
+  let chargeResult: any
+  try {
+    chargeResult = await client.pay(`${PROVIDER_A_URL}/price`, { forceMode: 'mpp-charge' })
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      (err.message.includes('ECONNREFUSED') || err.message.includes('fetch failed'))
+    ) {
+      if (process.env.CI && process.env.E2E_ALLOW_SKIP !== 'true') {
+        throw err
+      }
+      log(
+        'mpp-charge',
+        'SKIP: Provider A unavailable (connection refused). Ensure Provider A is running.',
+      )
+      return
+    }
+    throw err
+  }
 
   assert(chargeResult, 'charge result should exist')
-  assert(
-    chargeResult.mode === 'mpp-charge' || chargeResult.mode === 'x402',
-    `expected mpp-charge or x402, got ${chargeResult.mode}`,
+  assert.equal(
+    chargeResult.mode,
+    'mpp-charge',
+    `expected mpp-charge, got ${chargeResult.mode} (x402 does not satisfy the MPP charge phase)`,
   )
   assert(chargeResult.data, 'charge should have response data')
   assert(chargeResult.amount, 'charge should have amount paid')
@@ -166,7 +185,7 @@ async function runTests(): Promise<void> {
   if (chargeResult.txHash) {
     log('mpp-charge', `✓ txHash=${chargeResult.txHash}`)
   } else {
-    log('mpp-charge', '✓ txHash=null (expected for session vouchers)')
+    log('mpp-charge', '✓ txHash=null (expected for discrete MPP charge)')
   }
 
   // ── Test 3: MPP session streaming ──────────────────────────────────────────
@@ -212,74 +231,6 @@ async function runTests(): Promise<void> {
       // Validate each item is an object (SSE event)
       assert(item, `voucher ${voucherCount} should not be null`)
 
-      if (voucherCount % 10 === 0) {
-        log('mpp-session', `  ...consumed ${voucherCount} vouchers`)
-      }
+      if (voucherCount % 10 === 0)
 
-      if (voucherCount >= TARGET_VOUCHERS) {
-        break
-      }
-    }
-  } catch (err) {
-    lastError = err instanceof Error ? err : new Error(String(err))
-    // Continue to close the session even if streaming failed
-    log('mpp-session', `⚠ Stream error after ${voucherCount} vouchers: ${lastError.message}`)
-  }
-
-  // Validate voucher consumption
-  assert(voucherCount > 0, `should have consumed at least 1 voucher, got ${voucherCount}`)
-  log('mpp-session', `✓ Consumed ${voucherCount} vouchers`)
-
-  // Close the session
-  const closeResult = await session.close()
-
-  assert(closeResult, 'close result should exist')
-  assert(closeResult.closeTxHash, 'session should have closeTxHash')
-  assert(closeResult.totalPaid, 'session should have totalPaid')
-  assert.equal(
-    closeResult.vouchersIssued,
-    voucherCount,
-    `vouchersIssued ${closeResult.vouchersIssued} should match consumed ${voucherCount}`,
-  )
-  log('mpp-session', `✓ Channel closed: ${closeResult.closeTxHash}`)
-  log('mpp-session', `✓ Total paid: ${closeResult.totalPaid} USDC`)
-  log('mpp-session', `✓ Vouchers issued: ${closeResult.vouchersIssued}`)
-
-  // ── Test 4: Graceful shutdown on simulated process signal ──────────────────
-  log('shutdown', 'Running graceful channel close on simulated signal test...')
-
-  const activeSessions = new Set<{ close: () => Promise<unknown> }>()
-  let closeCalls = 0
-  const fakeSession = {
-    close: async () => {
-      closeCalls++
-      return { closeTxHash: 'simulated-close-tx', totalPaid: '0.0001', vouchersIssued: 1 }
-    },
-  }
-  activeSessions.add(fakeSession)
-
-  // Simulate the shutdown path triggered by SIGINT/SIGTERM/uncaughtException.
-  await closeAllSessions(activeSessions)
-
-  assert.equal(closeCalls, 1, 'active session close() should be invoked exactly once on shutdown')
-  assert.equal(activeSessions.size, 0, 'session registry should be empty after shutdown')
-  log('shutdown', '✓ Active session closed and removed from registry on simulated signal')
-
-  // Verify the timeout path does not hang the process.
-  const hangingSessions = new Set<{ close: () => Promise<unknown> }>()
-  hangingSessions.add({ close: () => new Promise<never>(() => {}) })
-  const start = Date.now()
-  await closeAllSessions(hangingSessions, 50)
-  assert(Date.now() - start < 2_000, 'shutdown should not block beyond the close timeout')
-  assert.equal(hangingSessions.size, 0, 'timed-out session should be removed from registry')
-  log('shutdown', '✓ Timed-out session close is bounded and cleaned up')
-
-  log('setup', 'All E2E tests passed')
-}
-
-// ── Entrypoint ────────────────────────────────────────────────────────────────
-
-runTests().catch((err) => {
-  console.error('E2E test suite failed:', err)
-  process.exitCode = 1
-})
+/* … truncated 2824 chars — edit only what you need near the top … */

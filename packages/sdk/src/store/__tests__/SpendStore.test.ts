@@ -47,6 +47,63 @@ describe('InMemorySpendStore', () => {
     assert.equal(reread?.endpoints['https://api.example.com'], '2000000')
   })
 
+  it('copies pending reservation entries at write and read boundaries', async () => {
+    const store = new InMemorySpendStore({ warn: false })
+    const state: DailySpend = {
+      date: '2026-06-26',
+      totalMicros: '5000000',
+      endpoints: { 'https://api.example.com': '2000000' },
+      pendingReserves: [
+        {
+          id: 'res-1',
+          endpoint: 'https://api.example.com',
+          amountMicros: '1000000',
+          createdAt: '2026-06-26T00:00:00.000Z',
+        },
+      ],
+    }
+    await store.write(state)
+
+    // Mutating the original array and its nested record must not affect stored state.
+    state.pendingReserves!.push({
+      id: 'res-2',
+      endpoint: 'https://api.example.com',
+      amountMicros: '2000000',
+      createdAt: '2026-06-26T00:00:01.000Z',
+    })
+    state.pendingReserves![0]!.amountMicros = '9990000000'
+
+    const read = await store.read()
+    assert.equal(read?.pendingReserves?.length, 1)
+    assert.equal(read?.pendingReserves?.[0]?.amountMicros, '1000000')
+
+    // Mutating the returned array and its nested record must not affect stored state.
+    read!.pendingReserves!.push({
+      id: 'res-3',
+      endpoint: 'https://api.example.com',
+      amountMicros: '3000000',
+      createdAt: '2026-06-26T00:00:02.000Z',
+    })
+    read!.pendingReserves![0]!.amountMicros = '1230000000'
+
+    const reread = await store.read()
+    assert.equal(reread?.pendingReserves?.length, 1)
+    assert.equal(reread?.pendingReserves?.[0]?.amountMicros, '1000000')
+  })
+
+  it('round-trips state without pendingReserves', async () => {
+    const store = new InMemorySpendStore({ warn: false })
+    const state: DailySpend = {
+      date: '2026-06-26',
+      totalMicros: '5000000',
+      endpoints: { 'https://api.example.com': '2000000' },
+    }
+    await store.write(state)
+    const read = await store.read()
+    assert.equal(read?.pendingReserves, undefined)
+    assert.equal(read?.totalMicros, '5000000')
+  })
+
   it('emits a non-durability warning by default', () => {
     const original = console.warn
     const messages: string[] = []
