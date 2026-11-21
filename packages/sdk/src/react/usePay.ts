@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useKikisApp } from './context.js'
+import { useKikisAppContext } from './context.js'
 import type { PaymentOptions, PaymentResult } from '../types.js'
 
 export interface UsePayState {
@@ -9,6 +9,8 @@ export interface UsePayState {
   pay: (options?: PaymentOptions) => Promise<PaymentResult | null>
   reset: () => void
 }
+
+export type UsePayResult = UsePayState
 
 function shallowEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true
@@ -27,7 +29,7 @@ function shallowEqual(a: unknown, b: unknown): boolean {
 }
 
 export function usePay(url: string, options?: PaymentOptions): UsePayState {
-  const client = useKikisApp()
+  const { client } = useKikisAppContext()
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<PaymentResult | null>(null)
   const [error, setError] = useState<Error | null>(null)
