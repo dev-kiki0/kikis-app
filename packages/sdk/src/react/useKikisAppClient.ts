@@ -9,7 +9,23 @@ export function useKikisAppClient(config: KikisAppClientConfig): KikisAppClient 
   const client = useMemo(
     () => new KikisAppClient(config),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [walletKey, config.network, spendCapKey, config.commitmentSecret, retryKey],
+    [
+      walletKey,
+      config.network,
+      spendCapKey,
+      config.commitmentSecret,
+      retryKey,
+      config.spendStore,
+      config.logger,
+      config.rpcUrl,
+      config.sorobanRpcUrl,
+      config.baseFeeStroops,
+      config.manifestTimeoutMs,
+      config.expectedPayee,
+      config.vault,
+      config.horizonRpcUrl,
+      config.rpcTimeoutMs,
+    ],
   )
 
   // Track the client instance whose ownership we currently hold. Disposing on

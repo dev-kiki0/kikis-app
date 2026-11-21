@@ -61,6 +61,7 @@ pnpm --filter @kikis-app/kikis-app test
 pnpm --filter @kikis-app/mcp-server test
 pnpm --filter provider-a test
 pnpm --filter provider-b test
+pnpm --filter web test
 
 step "provider bundles"
 # Catches a dependency that cannot run on Workers — the runtime rejects eval
