@@ -77,7 +77,7 @@ export default function DocsPage() {
           </nav>
 
           {/* Content */}
-          <div className="space-y-16">
+          <main className="space-y-16">
             <div>
               <h1 className="text-3xl font-bold text-[var(--text-primary)] mb-2">Documentation</h1>
               <p className="text-[var(--text-secondary)]">
@@ -330,7 +330,7 @@ PROVIDER_B_URL=http://localhost:3002`}</Code>
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 NEXT_PUBLIC_STELLAR_NETWORK=testnet`}</Code>
             </Section>
-          </div>
+          </main>
         </div>
       </div>
     </div>
