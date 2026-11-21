@@ -1,6 +1,8 @@
 import { config as loadDotenv } from 'dotenv'
 import path from 'path'
 import os from 'os'
+import { fileURLToPath } from 'url'
+import { readFileSync } from 'fs'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
@@ -28,6 +30,14 @@ import {
   type CheckBalanceArgs,
   type ListProvidersArgs,
 } from './handlers.js'
+
+// Load package.json version for MCP server identification
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const packageJson = JSON.parse(
+  readFileSync(path.join(__dirname, '../package.json'), 'utf-8'),
+) as { version: string }
+const VERSION = packageJson.version
+
 // Load environment variables (supports .env files for external secret management)
 const envPath = process.env.KIKIS_APP_ENV_FILE
 if (envPath) {
@@ -106,7 +116,7 @@ const deps: HandlerDeps = {
 const server = new Server(
   {
     name: '@kikis-app/mcp-server',
-    version: '0.1.0',
+    version: VERSION,
   },
   {
     capabilities: {
