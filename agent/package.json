@@ -5,7 +5,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "start": "node dist/index.js",
+    "start": "node --import ./load-env.mjs dist/index.js",
     "typecheck": "tsc --noEmit",
     "test:e2e": "tsx __tests__/e2e.test.ts",
     "test:stress": "tsx --test __tests__/stress.test.ts",
