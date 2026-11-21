@@ -104,6 +104,15 @@ export class NulthClient {
 
     const bucket = dayBucket(context.ledgerSequence)
     if (bucket !== this.policy.dayBucket) {
+      // Only reset if moving forward to a future bucket; reject historical buckets.
+      // This prevents an attacker from supplying a past ledgerSequence to wipe out
+      // the current day's spend accumulator and bypass the daily cap.
+      if (bucket < this.policy.dayBucket) {
+        throw new NulthPolicyError(
+          'invalid_bucket_sequence',
+          `Cannot process payment from historical bucket ${bucket}; current bucket is ${this.policy.dayBucket}`,
+        )
+      }
       this.policy.dayBucket = bucket
       this.policy.dailySpendStroops = 0n
       this.policy.assetSpendStroops = {}
