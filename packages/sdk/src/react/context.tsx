@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { KikisAppClient } from '../client/KikisAppClient.js'
 
@@ -23,7 +23,10 @@ export interface KikisAppProviderProps extends KikisAppContextValue {
  */
 export function KikisAppProvider(props: KikisAppProviderProps) {
   const { children, client, supabase } = props
-  const value: KikisAppContextValue = supabase ? { client, supabase } : { client }
+  const value: KikisAppContextValue = useMemo(
+    () => (supabase ? { client, supabase } : { client }),
+    [client, supabase],
+  )
   return (
     <KikisAppContext.Provider value={value}>
       {children}

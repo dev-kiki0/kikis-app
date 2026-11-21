@@ -64,10 +64,11 @@ export class NulthClient {
       )
     }
     const warnMsg = 'NulthClient is using the insecure mock prover; proofs are not cryptographically sound'
-    if (typeof config.logger === 'function') {
-      config.logger('warn', warnMsg)
-    } else if (config.logger && typeof config.logger.warn === 'function') {
-      config.logger.warn(warnMsg)
+    const logger = config.logger
+    if (typeof logger === 'function') {
+      logger('warn', warnMsg)
+    } else if (logger && typeof logger.warn === 'function') {
+      logger.warn(warnMsg)
     } else {
       console.warn(warnMsg)
     }
