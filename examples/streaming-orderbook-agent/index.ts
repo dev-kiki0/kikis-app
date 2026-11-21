@@ -25,6 +25,11 @@ function requireSecret(name: string, value: string): void {
 }
 
 function toNumber(value: unknown): number | null {
+  // Reject null, empty and whitespace-only values before Number() so a blank
+  // price is not silently coerced to 0 and accepted as a valid quote.
+  if (value === null || value === undefined) return null
+  if (typeof value === 'string' && value.trim() === '') return null
+
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : null
 }

@@ -71,8 +71,8 @@ Store as `OPENZEPPELIN_API_KEY` in `apps/provider-a/.dev.vars` (for local dev) o
 Providers (`provider-a` and `provider-b`) run as Cloudflare Workers. For local testing, populate their `.dev.vars` files. For the agent runner (Node), populate `agent/.env`:
 
 ```bash
-cp apps/provider-a/.dev.vars.example apps/provider-a/.dev.vars 2>/dev/null || cp apps/provider-a/.env.example apps/provider-a/.dev.vars
-cp apps/provider-b/.dev.vars.example apps/provider-b/.dev.vars 2>/dev/null || cp apps/provider-b/.env.example apps/provider-b/.dev.vars
+cp apps/provider-a/.dev.vars.example apps/provider-a/.dev.vars
+cp apps/provider-b/.dev.vars.example apps/provider-b/.dev.vars
 cp agent/.env.example agent/.env
 ```
 
@@ -100,14 +100,14 @@ pnpm --filter agent build
 
 **Terminal 1 — Provider A:**
 ```bash
-pnpm --filter provider-a start
+pnpm --filter provider-a dev
 # Verify: curl http://localhost:3001/health
 # Verify: curl http://localhost:3001/.well-known/kikis-app.json
 ```
 
 **Terminal 2 — Provider B:**
 ```bash
-pnpm --filter provider-b start
+pnpm --filter provider-b dev
 # Verify: curl http://localhost:3002/health
 # Verify: curl http://localhost:3002/.well-known/kikis-app.json
 ```

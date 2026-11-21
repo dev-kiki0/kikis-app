@@ -87,7 +87,8 @@ export const TOOLS: Tool[] = [
       properties: {
         url: {
           type: 'string',
-          description: 'The base URL of the provider (e.g., https://api-b.kikis-app.xyz)',
+          description:
+            'The full URL of the provider streaming endpoint, including its path (e.g., https://api-b.kikis-app.xyz/stream/orderbook). This exact URL is used for the session voucher requests, so pass the streaming route from the provider manifest rather than the bare base URL.',
         },
         initial_deposit: {
           type: 'string',
@@ -192,12 +193,11 @@ export const TOOLS: Tool[] = [
       properties: {
         tags: {
           type: 'string',
-          description: 'Comma-separated tags to filter providers (e.g., "price,stellar,dex")',
+          description: 'Comma-separated tags to filter providers (e.g., "price,stellar")',
         },
         network: {
           type: 'string',
-          enum: ['testnet', 'mainnet'],
-          description: 'Filter by Stellar network',
+          description: 'Optional network filter (e.g., "testnet" or "mainnet")',
         },
         limit: {
           type: 'integer',
@@ -208,29 +208,9 @@ export const TOOLS: Tool[] = [
         offset: {
           type: 'integer',
           minimum: 0,
-          description: 'Number of providers to skip before returning results (default 0)',
+          description: 'Number of providers to skip for pagination (default 0)',
         },
       },
-      required: [],
-    },
-  },
-  {
-    name: 'check_spend_cap',
-    description:
-      'Check the current daily spend cap status, including configured daily cap, total spent today, and remaining spend allowance in USDC.',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
-  },
-  {
-    name: 'check_vault_status',
-    description:
-      'Check the status of the configured smart vault (e.g. NulthVault or AgentVault), returning active allowlist, current ledger sequence, and session expiry ledger.',
-    inputSchema: {
-      type: 'object',
-      properties: {},
       required: [],
     },
   },

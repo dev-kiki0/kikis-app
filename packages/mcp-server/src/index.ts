@@ -31,14 +31,46 @@ import {
 // Load environment variables (supports .env files for external secret management)
 const envPath = process.env.KIKIS_APP_ENV_FILE
 if (envPath) {
-  loadDotenv({ path: envPath })
+  // An explicitly configured env file must load successfully. If it fails we
+  // report a distinct, actionable startup error (without printing any values)
+  // so operators don't silently fall back to inherited environment values.
+  const result = loadDotenv({ path: envPath })
+  if (result.error) {
+    const reason = result.error instanceof Error ? result.error.message : String(result.error)
+    console.error(
+      `Error: Failed to load environment file from KIKIS_APP_ENV_FILE (${envPath}): ${reason}`
+    )
+    console.error(
+      'Check that the path exists, is readable, and contains valid KEY=VALUE entries, or unset KIKIS_APP_ENV_FILE to use the default optional .env behavior.'
+    )
+    process.exit(1)
+  }
 } else {
+  // Default .env is optional; a missing file is not an error.
   loadDotenv()
 }
 
 // Environment variables
 const STELLAR_SECRET = process.env.STELLAR_SECRET || process.env.KIKIS_APP_WALLET_SECRET
-const STELLAR_NETWORK = (process.env.STELLAR_NETWORK || 'testnet') as 'testnet' | 'mainnet'
+
+// Validate STELLAR_NETWORK before it reaches the client or Horizon lookups.
+// Unset preserves the documented testnet default; unknown values fail fast
+// with an actionable startup error naming the variable.
+const SUPPORTED_STELLAR_NETWORKS = ['testnet', 'mainnet'] as const
+type StellarNetwork = (typeof SUPPORTED_STELLAR_NETWORKS)[number]
+
+function resolveStellarNetwork(raw: string | undefined): StellarNetwork {
+  const value = raw === undefined || raw === '' ? 'testnet' : raw
+  if (!(SUPPORTED_STELLAR_NETWORKS as readonly string[]).includes(value)) {
+    console.error(
+      `Error: STELLAR_NETWORK must be one of ${SUPPORTED_STELLAR_NETWORKS.join(', ')} (got "${value}")`
+    )
+    process.exit(1)
+  }
+  return value as StellarNetwork
+}
+
+const STELLAR_NETWORK: StellarNetwork = resolveStellarNetwork(process.env.STELLAR_NETWORK)
 const COMMITMENT_SECRET = process.env.COMMITMENT_SECRET
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_KEY = process.env.SUPABASE_KEY || process.env.SUPABASE_SERVICE_KEY

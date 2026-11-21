@@ -19,13 +19,14 @@ export function TxHashLink({ hash, network, className }: TxHashLinkProps) {
       href={explorerUrl(network, 'tx', hash)}
       target="_blank"
       rel="noopener noreferrer"
+      aria-label={`View transaction ${hash} on the block explorer (opens in a new tab)`}
       className={cn(
         'inline-flex items-center gap-1 font-mono text-xs text-[var(--mono)] hover:underline',
         className,
       )}
     >
-      {truncateHash(hash)}
-      <ExternalLink className="h-3 w-3 shrink-0" />
+      <span aria-hidden="true">{truncateHash(hash)}</span>
+      <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
     </a>
   )
 }

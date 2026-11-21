@@ -115,6 +115,7 @@ Add to `claude_desktop_config.json`:
       "env": {
         "STELLAR_SECRET": "S...",
         "STELLAR_NETWORK": "testnet",
+        "KIKIS_APP_DAILY_CAP": "1.00",
         "COMMITMENT_SECRET": "S...",
         "SUPABASE_URL": "https://...",
         "SUPABASE_KEY": "..."
@@ -156,6 +157,7 @@ All tools return structured error responses:
 
 - `STELLAR_SECRET`: Required - Wallet secret key
 - `STELLAR_NETWORK`: Required - "testnet" or "mainnet"
+- `KIKIS_APP_DAILY_CAP`: Required - Maximum daily spend in USDC, as a decimal string (e.g. `"1.00"`). The server exits at startup if this is unset.
 - `COMMITMENT_SECRET`: Optional - For session mode
 - `SUPABASE_URL`: Optional - For provider registry
 - `SUPABASE_KEY`: Optional - For provider registry
@@ -203,7 +205,8 @@ const client = new KikisAppClient({
   commitmentSecret: commitmentKey
 })
 
-const result = await client.pay(url, { preferredMode: 'x402' })
+// The SDK option is `forceMode` (ModeSelectOptions.forceMode), not `preferredMode`.
+const result = await client.pay(url, { forceMode: 'x402' })
 // Handle errors, parse results, manage state...
 ```
 
