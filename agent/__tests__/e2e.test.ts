@@ -19,7 +19,7 @@
  *   COMMITMENT_SECRET    Ed25519 keypair for MPP session (optional)
  *   PROVIDER_A_URL       URL of price provider (default: http://localhost:3001)
  *   PROVIDER_B_URL       URL of orderbook provider (default: http://localhost:3002)
- *   AGENT_DAILY_CAP_USDC Daily spending cap in USDC (default: 0.002)
+ *   AGENT_DAILY_CAP_USDC Daily spending cap in USDC (default: 0.0068)
  */
 
 import path from 'node:path'
@@ -34,7 +34,9 @@ const STELLAR_NETWORK = (process.env['STELLAR_NETWORK'] ?? 'testnet') as 'testne
 const AGENT_SECRET = process.env['AGENT_SECRET'] ?? ''
 const PROVIDER_A_URL = (process.env['PROVIDER_A_URL'] ?? 'http://localhost:3001').replace(/\/$/, '')
 const PROVIDER_B_URL = (process.env['PROVIDER_B_URL'] ?? 'http://localhost:3002').replace(/\/$/, '')
-const AGENT_DAILY_CAP_USDC = process.env['AGENT_DAILY_CAP_USDC'] ?? '0.002'
+// Default budget covers the full advertised workload at the checked-in rates:
+// 0.001 (x402) + 0.0008 (MPP charge) + 50 * 0.0001 (vouchers) = 0.0068 USDC.
+const AGENT_DAILY_CAP_USDC = process.env['AGENT_DAILY_CAP_USDC'] ?? '0.0068'
 const COMMITMENT_SECRET = process.env['COMMITMENT_SECRET'] ?? ''
 
 const TARGET_VOUCHERS = 50

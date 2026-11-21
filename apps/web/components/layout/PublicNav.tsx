@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 
 export function PublicNav() {
   const [scrolled, setScrolled] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
 
   useEffect(() => {
     function onScroll() {
@@ -77,8 +78,77 @@ export function PublicNav() {
             >
               GitHub
             </Link>
+            <button
+              type="button"
+              onClick={() => setMenuOpen((open) => !open)}
+              aria-expanded={menuOpen}
+              aria-controls="public-nav-mobile-menu"
+              aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              className="md:hidden inline-flex items-center justify-center rounded-lg border border-[var(--border-default)] bg-transparent p-1.5 text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
+            >
+              <svg
+                className="h-5 w-5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                {menuOpen ? (
+                  <>
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </>
+                ) : (
+                  <>
+                    <line x1="3" y1="6" x2="21" y2="6" />
+                    <line x1="3" y1="12" x2="21" y2="12" />
+                    <line x1="3" y1="18" x2="21" y2="18" />
+                  </>
+                )}
+              </svg>
+            </button>
           </div>
         </div>
+
+        {/* Mobile nav — below desktop breakpoint */}
+        {menuOpen && (
+          <div
+            id="public-nav-mobile-menu"
+            className="md:hidden flex flex-col gap-1 border-t border-[var(--border-default)] py-3"
+          >
+            <a
+              href="#features"
+              onClick={() => setMenuOpen(false)}
+              className="rounded-md px-2 py-2 text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
+            >
+              Features
+            </a>
+            <a
+              href="#how-it-works"
+              onClick={() => setMenuOpen(false)}
+              className="rounded-md px-2 py-2 text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
+            >
+              How it Works
+            </a>
+            <a
+              href="#faq"
+              onClick={() => setMenuOpen(false)}
+              className="rounded-md px-2 py-2 text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
+            >
+              FAQ
+            </a>
+            <a
+              href="/dashboard"
+              onClick={() => setMenuOpen(false)}
+              className="rounded-md px-2 py-2 text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
+            >
+              Dashboard
+            </a>
+          </div>
+        )}
       </div>
     </nav>
   )
