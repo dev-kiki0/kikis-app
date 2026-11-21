@@ -1,5 +1,5 @@
 {
-  "name": "@nulth/sdk",
+  "name": "@kikis-app/nulth-sdk",
   "version": "0.1.0",
   "description": "Nulth payment SDK",
   "main": "dist/index.js",
@@ -19,6 +19,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "lint": "eslint .",
+    "test": "vitest",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

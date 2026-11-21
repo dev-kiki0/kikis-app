@@ -30,7 +30,7 @@ export function DashboardMetrics({ initialStats }: DashboardMetricsProps) {
   }, [])
 
   useEffect(() => {
-    if (!configured) return
+    if (!isSupabaseConfigured()) return
     // `set-state-in-effect` (error in eslint-plugin-react-hooks v6) forbids a
     // synchronous setState in the effect body, so the first refresh is deferred.
     const initialRefresh = setTimeout(() => {
@@ -40,7 +40,9 @@ export function DashboardMetrics({ initialStats }: DashboardMetricsProps) {
   }, [refreshStats])
 
   useEffect(() => {
+    if (!isSupabaseConfigured()) return
     const supabase = getSupabaseBrowserClient()
+    if (!supabase) return
     const channel = supabase
       .channel('dashboard_metrics_tx_log')
       .on(
@@ -58,9 +60,9 @@ export function DashboardMetrics({ initialStats }: DashboardMetricsProps) {
       setRealtimeConnected(false)
       void supabase.removeChannel(channel)
     }
-  }, [refreshStats, configured])
+  }, [refreshStats])
 
-  if (!configured) {
+  if (!isSupabaseConfigured()) {
     return (
       <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-6">
         <h2 className="text-lg font-semibold text-amber-200">Supabase not configured</h2>
@@ -84,6 +86,7 @@ export function DashboardMetrics({ initialStats }: DashboardMetricsProps) {
   }
 
   useEffect(() => {
+    if (!isSupabaseConfigured()) return
     // Poll less aggressively while the realtime channel is live; fall back to
     // the original cadence if the WebSocket is blocked by a client firewall.
     const refreshInterval = setInterval(

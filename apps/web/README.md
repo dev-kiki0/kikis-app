@@ -21,9 +21,13 @@ pnpm --filter web test
 
 This app runs on Cloudflare Workers via the [OpenNext](https://opennext.js.org/cloudflare) adapter. Config lives in `wrangler.jsonc` and `open-next.config.ts`.
 
+Run these from the repository root. `preview` and `deploy` are scripts in the `web` package, so they must be filtered to it — a bare `pnpm deploy` would hit pnpm's built-in `deploy` command instead.
+
 ```bash
-pnpm preview   # build + run the Worker locally
-pnpm deploy    # build + deploy to Cloudflare
+pnpm --filter web preview   # build + run the Worker locally
+pnpm --filter web deploy    # build + deploy to Cloudflare
 ```
+
+Equivalently, `cd apps/web` first and run `pnpm preview` / `pnpm deploy` there.
 
 `deploy` needs `CLOUDFLARE_API_TOKEN` in the environment.

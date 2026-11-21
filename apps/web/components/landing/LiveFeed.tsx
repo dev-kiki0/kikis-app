@@ -1,26 +1,27 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getSupabaseBrowserClient, type TxLogEntry } from '@/lib/supabase'
-import { networkLabel } from '@/lib/explorer'
-import { ModeBadge } from '@/components/shared/ModeBadge'
-import { RelativeTime } from '@/components/shared/RelativeTime'
-import { TxHashLink } from '@/components/shared/TxHashLink'
-
-function isPaymentMode(mode: string | null): mode is 'x402' | 'mpp-charge' | 'mpp-session' {
-  return mode === 'x402' || mode === 'mpp-charge' || mode === 'mpp-session'
-}
+import { getSupabaseBrowserClient } from '@/lib/supabase'
+import type { TxLogEntry } from '@/lib/supabase'
+import { TxHashLink } from '@/components/ui/TxHashLink'
+import { getNetworkLabel } from '@/lib/network'
 
 interface LiveFeedProps {
-  initialEntries?: TxLogEntry[]
+  initialEntries: TxLogEntry[]
 }
 
-export function LiveFeed({ initialEntries = [] }: LiveFeedProps) {
+function networkLabel(network: string | null | undefined): string {
+  return getNetworkLabel(network)
+}
+
+export function LiveFeed({ initialEntries }: LiveFeedProps) {
   const [entries, setEntries] = useState<TxLogEntry[]>(initialEntries)
-  const [feedFailed, setFeedFailed] = useState(false)
 
   useEffect(() => {
+    let cancelled = false
+
     async function poll() {
+      const requestId = ++latestRequest
       const supabase = getSupabaseBrowserClient()
       const { data, error } = await supabase
         .from('tx_log')
@@ -28,81 +29,60 @@ export function LiveFeed({ initialEntries = [] }: LiveFeedProps) {
         .order('created_at', { ascending: false })
         .limit(5)
 
+      if (cancelled) return
       if (error) {
-        // Keep the rows already on screen and flag the feed as unavailable.
-        console.warn('[live-feed] failed to load tx_log:', error.message)
-        setFeedFailed(true)
+        console.error('[live-feed] poll failed:', error.message)
         return
       }
-      setFeedFailed(false)
-      if (data) setEntries(data as TxLogEntry[])
+      setEntries((data ?? []) as TxLogEntry[])
     }
 
-    void poll()
-    const interval = setInterval(() => void poll(), 10_000)
-    return () => clearInterval(interval)
+    const interval = setInterval(poll, 10_000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
   }, [])
 
-  if (entries.length === 0) {
-    return (
-      <div className="rounded-2xl border border-white/5 bg-[#101A33] p-6">
-        <div className="flex items-center gap-2 mb-4">
-          {!feedFailed && (
-            <span className="h-1.5 w-1.5 rounded-full bg-[var(--status-success)] animate-pulse" />
-          )}
-          <span className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
-            Live Feed
-          </span>
-        </div>
-        {feedFailed ? (
-          <p className="text-sm text-[var(--status-error)]">Feed unavailable</p>
-        ) : (
-          <p className="text-sm text-[var(--text-muted)]">Waiting for transactions...</p>
-        )}
-      </div>
-    )
-  }
-
   return (
-    <div className="rounded-2xl border border-white/5 bg-[#101A33] p-6">
-      <div className="flex items-center gap-2 mb-4">
-        {!feedFailed && (
-          <span className="h-1.5 w-1.5 rounded-full bg-[var(--status-success)] animate-pulse" />
-        )}
+    <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-6">
+      <div className="flex items-center justify-between mb-4">
         <span className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
-          Live Feed — {networkLabel()}
+          Live Feed
         </span>
       </div>
-      {feedFailed && (
-        <p className="mb-4 text-sm text-[var(--status-error)]">Feed unavailable</p>
-      )}
-      <ul className="space-y-3">
-        {entries.map((entry) => (
-          <li key={entry.id} className="flex items-center gap-3">
-            {isPaymentMode(entry.mode) ? (
-              <ModeBadge mode={entry.mode} />
-            ) : (
-              <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-white/5 text-white/40">
-                {entry.tx_type}
-              </span>
-            )}
-            <span className="text-xs text-[var(--text-muted)] flex-1 truncate">
-              {entry.amount != null && (
-                <span className="font-mono text-[var(--text-secondary)]">
-                  ${Number(entry.amount).toFixed(4)}
+
+      {entries.length === 0 ? (
+        <p className="text-sm text-[var(--text-muted)]">No transactions yet.</p>
+      ) : (
+        <ul className="space-y-3">
+          {entries.map((entry) => (
+            <li
+              key={entry.id}
+              className="flex items-center justify-between gap-3 text-sm"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider border border-[var(--border-default)] text-[var(--text-muted)]">
+                  {networkLabel(entry.network)}
                 </span>
-              )}{' '}
-              {entry.tx_type === 'channel_open' ? 'opened' : entry.tx_type === 'channel_close' ? 'closed' : entry.tx_type === 'policy_reject' ? 'rejected' : 'settled'}
-            </span>
-            {entry.tx_hash && (
-              <TxHashLink hash={entry.tx_hash} network={entry.network} />
-            )}
-            <span className="text-xs text-[var(--text-muted)] shrink-0">
-              <RelativeTime date={entry.created_at} />
-            </span>
-          </li>
-        ))}
-      </ul>
+                <span className="truncate text-[var(--text-secondary)]">
+                  {entry.mode ?? 'payment'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {entry.amount != null && (
+                  <span className="font-mono text-[var(--text-primary)]">
+                    {entry.amount} USDC
+                  </span>
+                )}
+                {entry.tx_hash && (
+                  <TxHashLink hash={entry.tx_hash} network={entry.network} />
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

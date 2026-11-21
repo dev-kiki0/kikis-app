@@ -51,6 +51,12 @@ interface OrderBookResponse {
  * every 5 seconds and burning Durable Object CPU time for as long as the
  * object lives.
  *
+ * At most one snapshot fetch is in flight per socket (#219). A slow Horizon
+ * endpoint would otherwise let each interval tick start another fetch while
+ * the previous one is still pending, piling up calls and delivering
+ * snapshots out of request order. Ticks that arrive while a fetch is pending
+ * are skipped; the next tick after completion (or failure) runs normally.
+ *
  * `stop()` must also be called from the socket's onClose/onError handlers for
  * clean teardown.
  */
@@ -61,6 +67,7 @@ export function startOrderbookPush(
 ): { stop: () => void } {
   let timer: ReturnType<typeof setInterval> | null = null
   let stopped = false
+  let inFlight = false
 
   const stop = (): void => {
     if (stopped) return
@@ -73,6 +80,7 @@ export function startOrderbookPush(
 
   const push = async (): Promise<void> => {
     if (stopped) return
+    if (inFlight) return
     if (socket.readyState !== 1) {
       // The socket is already gone (abnormal disconnect — onClose will not
       // fire). Stop polling instead of querying Horizon forever.
@@ -80,6 +88,7 @@ export function startOrderbookPush(
       return
     }
 
+    inFlight = true
     let snapshot: unknown
     try {
       snapshot = await fetchSnapshot()
@@ -87,6 +96,8 @@ export function startOrderbookPush(
       // Horizon blip — keep the interval alive; the next tick retries.
       console.error('[horizon] orderbook ws error:', err)
       return
+    } finally {
+      inFlight = false
     }
 
     if (stopped) return
@@ -223,54 +234,22 @@ export class ChannelSession extends DurableObject<Env> {
       )
     }
 
-    const providerUrl = `${env.PUBLIC_BASE_URL ?? 'https://api-b.kikis-app.xyz'}/stream/orderbook`
-
-    const sessionWriters = createSessionWriters(supabase, {
-      payee: env.STELLAR_PAYEE_ADDRESS,
-      network,
-      channelContract,
-      providerUrl,
+    const app = kikisAppHono({
+      manifest,
+      commitmentPublicKey,
+      store: Store.memory(),
+      writers: createSessionWriters(this.ctx.storage),
     })
 
-    const sessionStore = this.ctx?.storage
-      ? Store.from({
-          get: (key: string) => this.ctx.storage.get(key),
-          put: (key: string, value: unknown) => this.ctx.storage.put(key, value),
-          delete: async (key: string) => { await this.ctx.storage.delete(key) },
-        })
-      : Store.memory()
+    app.get('/health', (c) => c.json({ ok: true }))
 
-    const app = new Hono()
+    return app
+  }
 
-    app.use(
-      '*',
-      kikisAppHono({
-        modes: ['mpp-session', 'mpp-session-ws'],
-        pricing: {
-          'mpp-session': { rate: SESSION_RATE, channelFactory: channelContract },
-          'mpp-session-ws': { rate: SESSION_RATE, channelFactory: channelContract },
-        },
-        asset: 'USDC',
-        assetContract,
-        payee: env.STELLAR_PAYEE_ADDRESS,
-        network,
-        payeeSecretKey: env.STELLAR_PAYEE_SECRET,
-        commitmentPublicKey,
-        sessionStore,
-        manifest,
-        ...sessionWriters,
-      }),
-    )
-
-    // WebSocket transport (mpp-session-ws). Registered before the SSE data
-    // route: the kikisAppHono middleware above verifies the handshake's
-    // Payment credential (MPP_SESSION_WS_VERIFIED); upgrade requests are
-    // answered with 101 here, everything else falls through to the data route.
-    const fetchOrderbook = async () => {
-      const params = new URLSearchParams({
-        selling_asset_type: 'native',
-        buying_asset_type: 'credit_alphanum4',
-        buying_asset_code: 'USDC',
-        buying_asset_issuer: USDC_ISSUERS[networ
-
-/* … truncated 5188 chars — edit only what you need near the top … */
+  async fetch(request: Request): Promise<Response> {
+    if (!this.app) {
+      this.app = this.buildApp()
+    }
+    return this.app.fetch(request, this.env, this.ctx)
+  }
+}

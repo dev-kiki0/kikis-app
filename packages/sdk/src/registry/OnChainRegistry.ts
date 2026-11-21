@@ -1,4 +1,4 @@
-import { Horizon } from '@stellar/stellar-sdk'
+import { Connection, PublicKey } from '@solana/web3.js'
 
 export interface OnChainProviderInfo {
   account: string
@@ -6,90 +6,68 @@ export interface OnChainProviderInfo {
   tags: string[]
 }
 
-function tryDecodeBase64(value: string): string {
-  if (
-    value.startsWith('http://') ||
-    value.startsWith('https://') ||
-    value.startsWith('/') ||
-    value.startsWith('[')
-  ) {
-    return value
+function decodeBase64Utf8(value: string): string {
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(value, 'base64').toString('utf-8')
   }
+  // atob yields a binary string; reinterpret the bytes as UTF-8 so the
+  // browser path matches the Buffer path for non-ASCII content.
+  const binary = atob(value)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return new TextDecoder('utf-8').decode(bytes)
+}
+
+function tryDecodeBase64(value: string): string {
   try {
-    const decoded =
-      typeof Buffer !== 'undefined'
-        ? Buffer.from(value, 'base64').toString('utf-8')
-        : atob(value)
+    const decoded = decodeBase64Utf8(value)
     if (decoded.length > 0 && decoded !== value) return decoded
   } catch {
-    // not valid base64 — return as-is
+    return value
   }
-  return value
+}
+
+function normalizeTags(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const tags: string[] = []
+  for (const entry of raw) {
+    if (typeof entry !== 'string') continue
+    const trimmed = entry.trim()
+    if (trimmed.length > 0) tags.push(trimmed)
+  }
+  return tags
 }
 
 export class OnChainRegistry {
-  private readonly horizon: Horizon.Server
-  private readonly knownAccounts: string[]
-  private readonly timeoutMs: number
+  private connection: Connection
 
-  constructor(options: {
-    horizonUrl: string
-    knownAccounts: string[]
-    timeoutMs?: number
-  }) {
-    this.horizon = new Horizon.Server(options.horizonUrl)
-    this.knownAccounts = options.knownAccounts
-    this.timeoutMs = options.timeoutMs ?? 10_000
+  constructor(connection: Connection) {
+    this.connection = connection
   }
 
-  /**
-   * stellar-sdk 14.6.1 has no way to cancel the underlying Horizon request, so
-   * we stop waiting on it instead: the promise returned here rejects once
-   * `timeoutMs` elapses, even though the request may still be in flight. The
-   * timer is always cleared, including on the error path.
-   */
-  private loadAccountWithTimeout(
-    accountId: string,
-  ): ReturnType<Horizon.Server['loadAccount']> {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`Horizon loadAccount timed out after ${this.timeoutMs}ms`)),
-        this.timeoutMs,
-      )
-    })
-
-    return Promise.race([this.horizon.loadAccount(accountId), timeout]).finally(() => {
-      if (timer !== undefined) clearTimeout(timer)
-    })
-  }
-
-  async listProviders(): Promise<OnChainProviderInfo[]> {
-    // Load all accounts concurrently so the worst case is one `timeoutMs`, not
-    // `knownAccounts.length * timeoutMs`. allSettled preserves input order, so
-    // results come back in `knownAccounts` order regardless of completion order.
-    const settled = await Promise.allSettled(
-      this.knownAccounts.map((accountId) => this.loadAccountWithTimeout(accountId)),
-    )
-
+  async getProviders(): Promise<OnChainProviderInfo[]> {
     const results: OnChainProviderInfo[] = []
+    const accounts = await this.connection.getProgramAccounts(new PublicKey(''))
 
-    for (let i = 0; i < settled.length; i++) {
-      const outcome = settled[i]!
-      // skip accounts that fail to load or time out — they may not exist yet
-      if (outcome.status !== 'fulfilled') continue
+    for (const { account, pubkey } of accounts) {
+      const accountId = pubkey.toBase58()
+      const dataEntries: Record<string, string> = {}
 
-      const accountId = this.knownAccounts[i]!
-      const account = outcome.value
+      try {
+        const decoded = JSON.parse(account.data.toString('utf-8'))
+        if (decoded && typeof decoded === 'object') {
+          for (const [key, value] of Object.entries(decoded)) {
+            if (typeof value === 'string') dataEntries[key] = value
+          }
+        }
+      } catch {
+        continue
+      }
 
-      const dataEntries = account.data_attr as Record<string, string> | undefined
-      if (!dataEntries) continue
-
-      const rawEndpoint = dataEntries['kikis-app_endpoint']
-      if (!rawEndpoint) continue
-
-      const endpoint = tryDecodeBase64(rawEndpoint)
-      if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) continue
+      const endpoint = dataEntries['kikis-app_endpoint']
+      if (!endpoint) continue
 
       let tags: string[] = []
       const rawTags = dataEntries['kikis-app_tags']
@@ -97,9 +75,12 @@ export class OnChainRegistry {
         const decoded = tryDecodeBase64(rawTags)
         try {
           const parsed = JSON.parse(decoded)
-          if (Array.isArray(parsed)) tags = parsed
+          if (Array.isArray(parsed)) tags = normalizeTags(parsed)
         } catch {
-          tags = decoded.split(',').map((t) => t.trim()).filter(Boolean)
+          tags = decoded
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean)
         }
       }
 

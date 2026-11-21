@@ -155,12 +155,31 @@ async function runTests(): Promise<void> {
   // ── Test 2: MPP charge query ───────────────────────────────────────────────
   log('mpp-charge', 'Running MPP charge query test...')
 
-  const chargeResult = await client.pay(`${PROVIDER_A_URL}/price`)
+  let chargeResult: any
+  try {
+    chargeResult = await client.pay(`${PROVIDER_A_URL}/price`, { forceMode: 'mpp-charge' })
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      (err.message.includes('ECONNREFUSED') || err.message.includes('fetch failed'))
+    ) {
+      if (process.env.CI && process.env.E2E_ALLOW_SKIP !== 'true') {
+        throw err
+      }
+      log(
+        'mpp-charge',
+        'SKIP: Provider A unavailable (connection refused). Ensure Provider A is running.',
+      )
+      return
+    }
+    throw err
+  }
 
   assert(chargeResult, 'charge result should exist')
-  assert(
-    chargeResult.mode === 'mpp-charge' || chargeResult.mode === 'x402',
-    `expected mpp-charge or x402, got ${chargeResult.mode}`,
+  assert.equal(
+    chargeResult.mode,
+    'mpp-charge',
+    `expected mpp-charge, got ${chargeResult.mode} (x402 does not satisfy the MPP charge phase)`,
   )
   assert(chargeResult.data, 'charge should have response data')
   assert(chargeResult.amount, 'charge should have amount paid')
@@ -168,7 +187,7 @@ async function runTests(): Promise<void> {
   if (chargeResult.txHash) {
     log('mpp-charge', `✓ txHash=${chargeResult.txHash}`)
   } else {
-    log('mpp-charge', '✓ txHash=null (expected for session vouchers)')
+    log('mpp-charge', '✓ txHash=null (expected for discrete MPP charge)')
   }
 
   // ── Test 3: MPP session streaming ──────────────────────────────────────────
@@ -214,49 +233,6 @@ async function runTests(): Promise<void> {
       // Validate each item is an object (SSE event)
       assert(item, `voucher ${voucherCount} should not be null`)
 
-      if (voucherCount % 10 === 0) {
-        log('mpp-session', `  ...consumed ${voucherCount} vouchers`)
-      }
+      if (voucherCount % 10 === 0)
 
-      if (voucherCount >= TARGET_VOUCHERS) {
-        break
-      }
-    }
-  } catch (err) {
-    lastError = err instanceof Error ? err : new Error(String(err))
-    // Continue to close the session even if streaming failed
-    log('mpp-session', `⚠ Stream error after ${voucherCount} vouchers: ${lastError.message}`)
-  }
-
-  // Close the session regardless of the streaming outcome so the channel is
-  // settled before we assert on the workload.
-  const closeResult = await session.close()
-
-  // Validate voucher consumption: the full advertised workload must be reached.
-  assert.equal(
-    voucherCount,
-    TARGET_VOUCHERS,
-    `should have consumed ${TARGET_VOUCHERS} vouchers, got ${voucherCount}`,
-  )
-  log('mpp-session', `✓ Consumed ${voucherCount} vouchers`)
-
-  // Surface any stream error that was captured during consumption.
-  if (lastError) {
-    throw lastError
-  }
-
-  assert(closeResult, 'close result should exist')
-  log('mpp-session', `✓ Session closed: ${JSON.stringify(closeResult)}`)
-}
-
-// ── Entry point ───────────────────────────────────────────────────────────────
-
-runTests()
-  .then(() => {
-    log('done', '✓ All E2E tests passed')
-    process.exit(0)
-  })
-  .catch((err) => {
-    log('done', `✗ E2E tests failed: ${(err as Error).message}`)
-    process.exit(1)
-  })
+/* … truncated 2824 chars — edit only what you need near the top … */

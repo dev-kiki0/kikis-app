@@ -86,14 +86,81 @@ export class FileSpendStore implements SpendStore {
       )
     }
 
+    let parsed: unknown
     try {
-      return JSON.parse(data) as DailySpend
+      parsed = JSON.parse(data)
     } catch {
       throw new Error(
         `[FileSpendStore] Spend file at ${this.filePath} contains invalid JSON. ` +
           `Delete or repair it before resuming. Raw content: ${data.slice(0, 120)}`,
       )
     }
+
+    // Validate DailySpend structure at the persistence boundary.
+    // Valid JSON with missing date, invalid amounts, or unexpected top-level type
+    // must be rejected so consumers do not encounter conversion errors or treat
+    // mismatched dates as different accounting days.
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error(
+        `[FileSpendStore] Spend file at ${this.filePath} is not a valid object. ` +
+          `Expected { date, totalMicros, endpoints, ... } but got ${typeof parsed}. ` +
+          `Delete or repair it before resuming. Raw content: ${data.slice(0, 120)}`,
+      )
+    }
+
+    const obj = parsed as Record<string, unknown>
+
+    if (typeof obj.date !== 'string') {
+      throw new Error(
+        `[FileSpendStore] Spend file at ${this.filePath} has invalid date field. ` +
+          `Expected a string (YYYY-MM-DD) but got ${typeof obj.date}. ` +
+          `Delete or repair it before resuming.`,
+      )
+    }
+
+    if (typeof obj.totalMicros !== 'string') {
+      throw new Error(
+        `[FileSpendStore] Spend file at ${this.filePath} has invalid totalMicros field. ` +
+          `Expected a string but got ${typeof obj.totalMicros}. ` +
+          `Delete or repair it before resuming.`,
+      )
+    }
+
+    if (!Number.isInteger(BigInt(obj.totalMicros)) || BigInt(obj.totalMicros) < 0n) {
+      throw new Error(
+        `[FileSpendStore] Spend file at ${this.filePath} has invalid totalMicros value. ` +
+          `Expected a non-negative integer string but got "${obj.totalMicros}". ` +
+          `Delete or repair it before resuming.`,
+      )
+    }
+
+    if (typeof obj.endpoints !== 'object' || obj.endpoints === null || Array.isArray(obj.endpoints)) {
+      throw new Error(
+        `[FileSpendStore] Spend file at ${this.filePath} has invalid endpoints field. ` +
+          `Expected an object but got ${typeof obj.endpoints}. ` +
+          `Delete or repair it before resuming.`,
+      )
+    }
+
+    // Validate all endpoint values are non-negative integer strings
+    for (const [key, value] of Object.entries(obj.endpoints)) {
+      if (typeof value !== 'string') {
+        throw new Error(
+          `[FileSpendStore] Spend file at ${this.filePath} has invalid endpoint value ` +
+            `at key "${key}". Expected a string but got ${typeof value}. ` +
+            `Delete or repair it before resuming.`,
+        )
+      }
+      if (!Number.isInteger(BigInt(value)) || BigInt(value) < 0n) {
+        throw new Error(
+          `[FileSpendStore] Spend file at ${this.filePath} has invalid endpoint value ` +
+            `at key "${key}". Expected a non-negative integer string but got "${value}". ` +
+            `Delete or repair it before resuming.`,
+        )
+      }
+    }
+
+    return parsed as DailySpend
   }
 
   async write(state: DailySpend): Promise<void> {
