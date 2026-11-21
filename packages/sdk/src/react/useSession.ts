@@ -57,10 +57,23 @@ export function useSession(url: string): UseSessionResult {
   }, [])
 
   const open = useCallback(async (): Promise<SessionHandle | null> => {
+    // Prevent concurrent opens from overwriting the active session. If already
+    // opening or open, return the existing handle to avoid listener replacement.
+    if (status === 'opening' || status === 'open') {
+      return sessionRef.current
+    }
     setStatus('opening')
     setError(null)
     try {
       const s = await client.openSession(url)
+      // Another open() may have completed while we were waiting for this one.
+      // Only apply the result if we're still the owner (no one else opened).
+      if (sessionRef.current && sessionRef.current !== s) {
+        s.close().catch(() => {
+          /* race-condition fallback close */
+        })
+        return sessionRef.current
+      }
       sessionRef.current = s
       // Subscribe to per-voucher updates so vouchers/cumulative move in real
       // time during streaming instead of staying at their initial zeros until
@@ -118,7 +131,7 @@ export function useSession(url: string): UseSessionResult {
       }
       return null
     }
-  }, [client, url])
+  }, [client, url, status])
 
   const close = useCallback(async (): Promise<SessionCloseResult | null> => {
     const s = sessionRef.current

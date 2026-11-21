@@ -55,8 +55,8 @@ export function usePay(url: string, options?: PaymentOptions): UsePayState {
       if (inFlightRef.current) return null
       inFlightRef.current = true
 
-      const controller = new AbortController()
-      abortRef.current = controller
+      const unmountController = new AbortController()
+      abortRef.current = unmountController
 
       if (mountedRef.current) {
         setLoading(true)
@@ -65,22 +65,56 @@ export function usePay(url: string, options?: PaymentOptions): UsePayState {
 
       try {
         const mergedOptions = overrideOptions ?? optionsRef.current
-        const res = await client.pay(url, {
-          ...mergedOptions,
-          signal: controller.signal,
-        })
-        if (mountedRef.current && !controller.signal.aborted) {
-          setResult(res)
+        const callerSignal = mergedOptions?.signal
+        
+        // If the caller provided a signal, chain it to our unmount controller
+        // so either abort reason (caller or unmount) will reject the payment.
+        // Create a new AbortController that aborts when either signal aborts.
+        const paymentController = new AbortController()
+        let unmountAbort: (() => void) | null = null
+        
+        if (callerSignal) {
+          // When caller's signal aborts, abort our payment controller
+          if (callerSignal.aborted) {
+            paymentController.abort(callerSignal.reason)
+          } else {
+            const abortHandler = () => paymentController.abort(callerSignal.reason)
+            callerSignal.addEventListener('abort', abortHandler)
+            unmountAbort = () => callerSignal.removeEventListener('abort', abortHandler)
+          }
         }
-        return res
+        
+        // When unmount happens, also abort the payment
+        if (!unmountController.signal.aborted) {
+          const abortHandler = () => paymentController.abort(unmountController.signal.reason)
+          unmountController.signal.addEventListener('abort', abortHandler)
+          const cleanup = unmountAbort
+          unmountAbort = () => {
+            cleanup?.()
+            unmountController.signal.removeEventListener('abort', abortHandler)
+          }
+        }
+        
+        try {
+          const res = await client.pay(url, {
+            ...mergedOptions,
+            signal: paymentController.signal,
+          })
+          if (mountedRef.current && !paymentController.signal.aborted) {
+            setResult(res)
+          }
+          return res
+        } finally {
+          unmountAbort?.()
+        }
       } catch (err) {
-        if (mountedRef.current && !controller.signal.aborted) {
+        if (mountedRef.current && !unmountController.signal.aborted) {
           setError(err instanceof Error ? err : new Error(String(err)))
         }
         return null
       } finally {
         inFlightRef.current = false
-        if (abortRef.current === controller) {
+        if (abortRef.current === unmountController) {
           abortRef.current = null
         }
         if (mountedRef.current) {
