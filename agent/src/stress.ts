@@ -70,15 +70,24 @@ const CONCURRENT_AGENTS = readPositiveCount('CONCURRENT_AGENTS', 50)
 const PAYMENTS_PER_SESSION = readPositiveCount('PAYMENTS_PER_SESSION', 10)
 
 // ── Types ────────────────────────────────────────────────────────────────────
-type Phase =
-  | 'manifest-get'
-  | 'stream-unpaid'
-  | 'price-unpaid'
-  | 'x402-paid'
-  | 'mpp-charge-paid'
-  | 'session-open'
-  | 'session-voucher'
-  | 'session-close'
+// The phase inventory is the single source of truth for every stress phase:
+// it is declared first, and the `Phase` type is derived from it. The union
+// and the array the reporter walks to detect missing phases can therefore
+// never drift — a phase can only enter the type through the inventory, so
+// reporting cannot silently skip a phase that the union names but the array
+// omits.
+const ALL_PHASES = [
+  'manifest-get',
+  'stream-unpaid',
+  'price-unpaid',
+  'x402-paid',
+  'mpp-charge-paid',
+  'session-open',
+  'session-voucher',
+  'session-close',
+] as const
+
+type Phase = (typeof ALL_PHASES)[number]
 
 type ForceMode = 'x402' | 'mpp-charge'
 
@@ -88,17 +97,6 @@ interface Sample {
   ok: boolean
   error?: string
 }
-
-const ALL_PHASES: Phase[] = [
-  'manifest-get',
-  'stream-unpaid',
-  'price-unpaid',
-  'x402-paid',
-  'mpp-charge-paid',
-  'session-open',
-  'session-voucher',
-  'session-close',
-]
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const t = () => performance.now()
