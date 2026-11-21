@@ -21,8 +21,8 @@ const TX_TYPE_LABEL: Record<TxLogEntry['tx_type'], string> = {
   policy_reject: 'rejected',
 }
 
-function isPaymentMode(mode: string | null): mode is 'x402' | 'mpp-charge' | 'mpp-session' {
-  return mode === 'x402' || mode === 'mpp-charge' || mode === 'mpp-session'
+function isPaymentMode(mode: string | null): mode is 'x402' | 'mpp-charge' | 'mpp-session' | 'mpp-session-ws' {
+  return mode === 'x402' || mode === 'mpp-charge' || mode === 'mpp-session' || mode === 'mpp-session-ws'
 }
 
 interface TxFeedProps {

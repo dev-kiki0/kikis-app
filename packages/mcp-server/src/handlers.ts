@@ -205,7 +205,14 @@ export async function handlePayForData(
     return err('Provider returned an undefined or invalid price')
   }
 
-  if (parseFloat(estimate.amount) > parseFloat(max_amount)) {
+  const maxAmountParsed = parseFloat(max_amount)
+  if (isNaN(maxAmountParsed) || maxAmountParsed < 0) {
+    return err(
+      `Invalid max_amount: must be a non-negative number (received "${max_amount}")`,
+    )
+  }
+
+  if (parseFloat(estimate.amount) > maxAmountParsed) {
     return err(
       `Provider cost ${estimate.amount} ${estimate.asset} exceeds max_amount ${max_amount} USDC`,
     )
