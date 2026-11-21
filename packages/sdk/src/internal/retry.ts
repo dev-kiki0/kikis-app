@@ -2,7 +2,7 @@
  * Retry utilities with exponential backoff and a lightweight circuit breaker.
  */
 
-export interface RetryOptions {
+export interface RetryPolicy {
   /** Maximum number of attempts (including the first). Defaults to 3. */
   maxAttempts?: number;
   /** Base delay in milliseconds. Defaults to 250. */
@@ -11,14 +11,62 @@ export interface RetryOptions {
   maxDelayMs?: number;
   /** Optional predicate to decide whether an error is retryable. */
   shouldRetry?: (error: unknown) => boolean;
+  /** Alias for `shouldRetry` used by some callers. */
+  retryable?: (error: unknown) => boolean;
+  /** Optional hook invoked before each retry with the attempt number and delay. */
+  onRetry?: (attempt: number, delayMs: number, error: unknown) => void;
+  /** Optional abort signal to cancel pending retries. */
+  signal?: AbortSignal;
 }
 
-const DEFAULT_MAX_ATTEMPTS = 3;
-const DEFAULT_BASE_DELAY_MS = 250;
-const DEFAULT_MAX_DELAY_MS = 5000;
+/** Backwards-compatible alias for the retry policy shape. */
+export type RetryOptions = RetryPolicy;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+export const DEFAULT_RETRY_POLICY: Required<
+  Pick<RetryPolicy, 'maxAttempts' | 'baseDelayMs' | 'maxDelayMs'>
+> = {
+  maxAttempts: 3,
+  baseDelayMs: 250,
+  maxDelayMs: 5000,
+};
+
+const DEFAULT_MAX_ATTEMPTS = DEFAULT_RETRY_POLICY.maxAttempts;
+const DEFAULT_BASE_DELAY_MS = DEFAULT_RETRY_POLICY.baseDelayMs;
+const DEFAULT_MAX_DELAY_MS = DEFAULT_RETRY_POLICY.maxDelayMs;
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error('Aborted'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error('Aborted'));
+    };
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
+}
+
+/**
+ * Compute the backoff delay for a given attempt using exponential backoff
+ * with full jitter: `Math.random() * min(baseDelayMs * 2^attempt, maxDelayMs)`.
+ */
+export function backoffDelayMs(
+  attempt: number,
+  baseDelayMs: number = DEFAULT_BASE_DELAY_MS,
+  maxDelayMs: number = DEFAULT_MAX_DELAY_MS,
+): number {
+  const exponential = baseDelayMs * 2 ** attempt;
+  return Math.random() * Math.min(exponential, maxDelayMs);
 }
 
 /**
@@ -26,15 +74,19 @@ function sleep(ms: number): Promise<void> {
  */
 export async function withRetry<T>(
   fn: () => Promise<T>,
-  options: RetryOptions = {},
+  options: RetryPolicy = {},
 ): Promise<T> {
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const baseDelayMs = options.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
   const maxDelayMs = options.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
-  const shouldRetry = options.shouldRetry ?? (() => true);
+  const shouldRetry = options.shouldRetry ?? options.retryable ?? (() => true);
+  const signal = options.signal;
 
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (signal?.aborted) {
+      throw signal.reason ?? new Error('Aborted');
+    }
     try {
       return await fn();
     } catch (error) {

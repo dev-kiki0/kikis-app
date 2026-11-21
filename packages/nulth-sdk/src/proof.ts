@@ -2,6 +2,125 @@ import { createHash } from 'node:crypto'
 import { Address, hash, scValToNative, xdr } from '@stellar/stellar-sdk'
 import { NulthPolicyError, type PaymentAuthContext } from './types.js'
 
+/** Proof representation compatible with on-chain verification */
+export interface NulthProof {
+  /** Hex-encoded proof bytes */
+  proof: string
+  /** Hex-encoded public signals (commitment, nullifier, ...) */
+  publicSignals: string[]
+}
+
+/** Public inputs bound into a Nulth payment authorization proof */
+export interface NulthPublicInputs {
+  commitment: string
+  nullifier: string
+  amount: string
+  recipient: string
+}
+
+/** Backend capable of producing a Nulth payment authorization proof */
+export interface ProverBackend {
+  /** Produce a proof for the given preimage and public inputs */
+  prove(preimage: Uint8Array, publicInputs: NulthPublicInputs): Promise<NulthProof>
+}
+
+/**
+ * Canonical length-prefixed encoding of a list of strings used as a proof
+ * preimage. Mirrors {@link canonicalEncodeStrings}.
+ */
+export function encodePreimage(items: readonly string[]): Uint8Array {
+  return canonicalEncodeStrings(items)
+}
+
+/** Convert a USDC amount (7 decimals) to stroops as a bigint */
+export function usdcToStroops(amount: string | number | bigint): bigint {
+  const value = typeof amount === 'string' ? amount.trim() : amount.toString()
+  if (value.length === 0) {
+    throw new NulthPolicyError('Invalid USDC amount: empty')
+  }
+  const negative = value.startsWith('-')
+  const unsigned = negative ? value.slice(1) : value
+  const [whole, fraction = ''] = unsigned.split('.')
+  if (!/^\d+$/.test(whole) || !/^\d*$/.test(fraction)) {
+    throw new NulthPolicyError(`Invalid USDC amount: ${amount}`)
+  }
+  if (fraction.length > 7) {
+    throw new NulthPolicyError(`USDC amount has more than 7 decimals: ${amount}`)
+  }
+  const padded = fraction.padEnd(7, '0')
+  const stroops = BigInt(whole) * 10_000_000n + BigInt(padded)
+  return negative ? -stroops : stroops
+}
+
+/**
+ * Encode an auth signature from a proof. The signature binds the proof's
+ * public signals into a deterministic hex string suitable for the signer.
+ */
+export function encodeAuthSignature(proof: NulthProof): string {
+  const signals = Array.isArray(proof.publicSignals) ? proof.publicSignals : []
+  return sha256Hex(
+    encodePreimage(['auth-signature', proof.proof, ...signals.map((s) => String(s))]),
+  )
+}
+
+/**
+ * Assert that an auth entry matches the expected Nulth account and context.
+ * Throws {@link NulthPolicyError} when the entry does not match.
+ */
+export function assertAuthEntryMatchesContext(
+  authEntry: string,
+  nulthAccount: string,
+  ctx: PaymentAuthContext,
+): void {
+  if (typeof authEntry !== 'string' || authEntry.length === 0) {
+    throw new NulthPolicyError('Missing auth entry')
+  }
+  if (typeof nulthAccount !== 'string' || nulthAccount.length === 0) {
+    throw new NulthPolicyError('Missing Nulth account')
+  }
+  if (!ctx || typeof ctx !== 'object') {
+    throw new NulthPolicyError('Missing payment auth context')
+  }
+
+  const digest = authDigestFromEntry(authEntry)
+  const expected = sha256Hex(
+    encodePreimage([
+      'auth-context',
+      nulthAccount,
+      ctx.recipient,
+      ctx.amount,
+      String(ctx.ledgerSequence),
+    ]),
+  )
+  if (digest !== expected) {
+    throw new NulthPolicyError('Auth entry does not match payment context')
+  }
+}
+
+/**
+ * Insecure mock prover used for local development and tests. Produces a
+ * deterministic proof from the preimage; never use in production.
+ */
+export function insecureMockProof(preimage: Uint8Array): NulthProof {
+  const commitment = sha256Hex(preimage)
+  const nullifier = sha256Hex(encodePreimage(['nullifier', commitment]))
+  return {
+    proof: sha256Hex(encodePreimage(['mock-proof', commitment, nullifier])),
+    publicSignals: [commitment, nullifier],
+  }
+}
+
+/** Default prover backend (mock) */
+export const DEFAULT_PROVER: ProverBackend = {
+  async prove(preimage: Uint8Array, publicInputs: NulthPublicInputs): Promise<NulthProof> {
+    const mock = insecureMockProof(preimage)
+    return {
+      proof: mock.proof,
+      publicSignals: [publicInputs.commitment, publicInputs.nullifier],
+    }
+  },
+}
+
 /** SHA-256 hex digest */
 export function sha256Hex(data: Buffer | string): string {
   const buf = typeof data === 'string' ? Buffer.from(data, 'utf8') : data

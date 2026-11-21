@@ -225,6 +225,20 @@ export interface HttpRequestOptions {
   body?: string | Uint8Array | Record<string, unknown> | unknown
 }
 
+/** Options accepted by client.pay() for any payment mode */
+export interface PaymentOptions {
+  /** Optional endpoint name to target (must exist in the manifest) */
+  endpoint?: string
+  /** Optional explicit amount override in the payment asset (decimal string) */
+  amount?: string
+  /** Optional payment mode override; must be supported by the provider */
+  mode?: PaymentMode
+  /** Optional HTTP request options for the paid call */
+  request?: HttpRequestOptions
+  /** Optional AbortSignal to cancel the payment before settlement */
+  signal?: AbortSignal
+}
+
 /** Result returned by client.pay() for any payment mode */
 export interface PaymentResult {
   /** Parsed response body from the provider */
