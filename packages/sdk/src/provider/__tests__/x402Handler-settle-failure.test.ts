@@ -26,7 +26,7 @@ const PAYER = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN'
 
 type SettleResponse = {
   success: boolean
-  transaction: string
+  transaction?: unknown
   errorReason?: string
 }
 
@@ -193,22 +193,31 @@ describe('kikis-app Express x402 — settle returns success: false (local facili
     }
   })
 
-  it('rejects success: true with an empty transaction hash', async () => {
-    settleResult = { success: true, transaction: '' }
-    const h = await makeHarness()
-    try {
-      const res = await paidRequest(h.url)
+  const invalidTransactionCases: { name: string; result: SettleResponse }[] = [
+    { name: 'an empty transaction hash', result: { success: true, transaction: '' } },
+    { name: 'a missing transaction field', result: { success: true } },
+    { name: 'a null transaction field', result: { success: true, transaction: null } },
+    { name: 'a numeric transaction field', result: { success: true, transaction: 123 } },
+  ]
 
-      assert.equal(res.status, 402)
-      assert.equal(res.headers.get('x-payment-response'), null)
-      await new Promise((r) => setImmediate(r))
-      assert.equal(h.downstream.called, false)
-      assert.deepEqual(h.seenSet, [])
-      assert.deepEqual(h.settled, [])
-    } finally {
-      await h.close()
-    }
-  })
+  for (const { name, result } of invalidTransactionCases) {
+    it(`rejects success: true with ${name}`, async () => {
+      settleResult = result
+      const h = await makeHarness()
+      try {
+        const res = await paidRequest(h.url)
+
+        assert.equal(res.status, 402)
+        assert.equal(res.headers.get('x-payment-response'), null)
+        await new Promise((r) => setImmediate(r))
+        assert.equal(h.downstream.called, false)
+        assert.deepEqual(h.seenSet, [])
+        assert.deepEqual(h.settled, [])
+      } finally {
+        await h.close()
+      }
+    })
+  }
 
   it('serves the resource and records the settlement on success', async () => {
     settleResult = { success: true, transaction: 'TX_HASH_1' }
