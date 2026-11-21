@@ -39,7 +39,7 @@ The agent finishes consuming the stream and calls `session.close()`. The provide
 ### Recovery sequence
 
 ```ts
-import { KikisAppNetworkError, KikisAppChannelStateError } from '@kikis-app/sdk'
+import { KikisAppNetworkError, KikisAppChannelStateError } from '@kikis-app/kikis-app'
 
 try {
   const result = await session.close()
@@ -100,7 +100,7 @@ The agent calls `session.close()`. The provider's endpoint is reachable but retu
 ### Recovery sequence
 
 ```ts
-import { KikisAppChannelStateError } from '@kikis-app/sdk'
+import { KikisAppChannelStateError } from '@kikis-app/kikis-app'
 
 try {
   const result = await session.close()
@@ -182,167 +182,6 @@ if (status === 'refundable') {
 
 ### Monitoring recommendation
 
-For long-running production agents, poll `getDisputeStatus()` on a schedule (e.g. every 1 000 ledgers ≈ 1.4 hours) if a refund window has been opened. Store the `channelId` and refund-open timestamp in durable storage so the agent can resume after a restart.
+For long-running production agents, poll `getDisputeStatus()` on a schedule (e.g. every 1 000 ledgers ≈ 
 
-```ts
-// Persist enough state to resume after a crash
-const savedState = {
-  channelId: session.channelId,
-  refundWindowOpenedAt: Date.now(),
-  refundWaitingPeriodLedgers: manifest.pricing['mpp-session']!.refund_waiting_period_ledgers,
-}
-```
-
----
-
-## Scenario 4: network partition during settlement
-
-The agent calls `session.close()` successfully — the `DELETE` request reaches the provider, the provider submits `settle_with_signature` — but the agent's connection drops before the HTTP response arrives. The agent receives a fetch error and does not know whether settlement succeeded.
-
-### What happens
-
-`close()` throws `KikisAppNetworkError`. The channel may or may not be settled on-chain. Acting as if it failed and calling `requestRefund()` could race with a legitimate provider settlement, wasting gas. Acting as if it succeeded could leave funds stranded if it actually failed.
-
-### Recovery sequence
-
-Always check on-chain state before taking any dispute action:
-
-```ts
-import { KikisAppNetworkError } from '@kikis-app/sdk'
-
-try {
-  const result = await session.close()
-  console.log('settled:', result.closeTxHash)
-} catch (err) {
-  if (err instanceof KikisAppNetworkError) {
-    console.warn('Network error during close — checking on-chain state before disputing')
-
-    // Wait a few seconds for any in-flight transaction to land
-    await sleep(10_000)
-
-    const status = await session.getDisputeStatus()
-    console.log('channel status after network error:', status)
-
-    switch (status) {
-      case 'settled':
-        // Provider's settlement landed on-chain — session closed correctly
-        console.log('Channel already settled — no action needed')
-        break
-
-      case 'open':
-        // Settlement did not land — retry close once before escalating
-        try {
-          const retry = await session.close()
-          console.log('retry settled:', retry.closeTxHash)
-        } catch (retryErr) {
-          // Retry also failed — open the refund window
-          console.warn('Retry failed — opening refund window')
-          const refundTxHash = await session.requestRefund()
-          console.log('refund window opened:', refundTxHash)
-          // Continue with Scenario 1 polling loop above
-        }
-        break
-
-      case 'in-refund-window':
-        // Agent or provider already opened a refund window in a prior attempt
-        // Wait out the window and check again (see Scenario 3)
-        console.log('Refund window already open — waiting for it to resolve')
-        break
-
-      case 'refundable':
-        // Window expired — claim refund (see Scenario 3)
-        console.log('Refundable — claiming refund')
-        break
-    }
-  }
-}
-```
-
-### Expected on-chain outcome
-
-| Status after partition | Correct action | Funds outcome |
-|---|---|---|
-| `settled` | None — already done | Provider receives owed amount |
-| `open` | Retry `close()`, then `requestRefund()` if retry fails | Normal settlement or refund after window |
-| `in-refund-window` | Wait, then claim if `refundable` | Full refund to agent if provider doesn't counter-settle |
-| `refundable` | `claim_refund` via Stellar SDK | Full refund to agent |
-
-The key invariant: **always call `getDisputeStatus()` before opening a refund window**. Opening a redundant refund window when the channel is already `settled` is a no-op but wastes gas and creates noise in event logs.
-
----
-
-## Calling `claim_refund` directly
-
-`SessionHandle` does not currently wrap `claim_refund` (the contract exposes it but the SDK method is not yet added). Use the Stellar SDK directly as shown in Scenario 3. The call requires:
-
-- The agent's main keypair (`AGENT_SECRET`) — not the commitment key
-- The channel contract address (`session.channelId`)
-- Channel must be in `refundable` state
-
-```ts
-// Minimal claim_refund helper
-async function claimRefund(channelId: string, agentSecret: string, network: 'testnet' | 'mainnet') {
-  const { rpc, Contract, TransactionBuilder, BASE_FEE, Keypair, Networks } =
-    await import('@stellar/stellar-sdk')
-
-  const rpcUrl = network === 'mainnet'
-    ? 'https://mainnet.sorobanrpc.com'
-    : 'https://soroban-testnet.stellar.org'
-  const passphrase = network === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET
-
-  const server = new rpc.Server(rpcUrl)
-  const agentKp = Keypair.fromSecret(agentSecret)
-  const contract = new Contract(channelId)
-
-  const account = await server.getAccount(agentKp.publicKey())
-  const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: passphrase })
-    .addOperation(contract.call('claim_refund'))
-    .setTimeout(30)
-    .build()
-
-  const prepared = await server.prepareTransaction(tx)
-  prepared.sign(agentKp)
-  const result = await server.sendTransaction(prepared)
-  return result.hash
-}
-```
-
----
-
-## Error reference
-
-| Error class | `retryable` | When thrown |
-|---|---|---|
-| `KikisAppNetworkError` | `true` | Fetch timeout, connection reset, DNS failure |
-| `KikisAppChannelStateError` | `false` | 4xx from provider, RPC simulation error, missing `closeTxHash`, `getDisputeStatus` RPC failure (simulation error, empty result, or any other RPC error) |
-| `KikisAppDisputeError` | `false` | `request_refund` or `settleWithLatestVoucher` failure |
-| `KikisAppSignatureError` | `false` | Ed25519 signing failed (key corruption or wrong commitment key) |
-| `KikisAppRefundWindowError` | `false` | Exported from the SDK but not currently thrown by it |
-
-Errors with `retryable: true` are automatically retried by the SDK according to the `RetryPolicy` passed to `KikisAppClientConfig`. Errors with `retryable: false` require the caller to decide — they represent either a protocol disagreement or a state that requires manual resolution.
-
-Callers of `getDisputeStatus()` should catch `KikisAppChannelStateError`, which the SDK throws for every failure of that method.
-
----
-
-## Decision tree
-
-```
-session.close() throws?
-│
-├─ No → done ✓
-│
-└─ Yes
-   │
-   ├─ KikisAppNetworkError
-   │   └─ getDisputeStatus()
-   │       ├─ 'settled'        → done ✓
-   │       ├─ 'open'           → retry close() → if fails: requestRefund()
-   │       ├─ 'in-refund-window' → wait + poll
-   │       └─ 'refundable'    → claim_refund via Stellar SDK
-   │
-   └─ KikisAppChannelStateError
-       └─ getDisputeStatus()
-           ├─ 'settled'        → done ✓  (provider settled during window)
-           └─ 'open'           → settleWithLatestVoucher()
-```
+/* … truncated 6561 chars — edit only what you need near the top … */

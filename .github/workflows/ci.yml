@@ -55,6 +55,8 @@ jobs:
         run: pnpm install
       - name: Build nulth-sdk (required by sdk at runtime)
         run: pnpm --filter @kikis-app/nulth-sdk build
+      - name: Run nulth-sdk tests
+        run: pnpm --filter @kikis-app/nulth-sdk test
       - name: Run SDK tests
         run: pnpm --filter @kikis-app/kikis-app test
       - name: Run MCP server tests
@@ -70,6 +72,10 @@ jobs:
         run: pnpm --filter provider-b test
       - name: Run web tests
         run: pnpm --filter web test
+      # Credential-free harness unit tests. Live payments stay confined to the
+      # separate E2E flow (e2e.yml) behind the AGENT_SECRET gate.
+      - name: Run agent stress harness tests
+        run: pnpm --filter agent test:stress
 
   app-build:
     runs-on: ubuntu-latest

@@ -34,7 +34,12 @@ export interface SyntheticPayment {
   channelId?: string
   /** Per-voucher rate (session modes), in decimal string. Default: '0.0001'. */
   rate?: string
-  /** Number of vouchers to emit before close (session modes). Default: 3. */
+  /**
+   * Number of vouchers to emit before close (session modes). Default: 3.
+   * Must be a non-negative integer; fractional, negative, or non-finite values
+   * are rejected before any callback runs. A count of 0 opens the session and
+   * settles a zero total without emitting any vouchers.
+   */
   voucherCount?: number
   /**
    * Payer passed to onSettled (4th arg) and onSessionOpen (2nd arg). Default: a
@@ -91,6 +96,29 @@ function toScaled(decimal: string): bigint {
 }
 
 /**
+ * Validate a synthetic voucher count before any session callback runs.
+ * Rejects non-finite, fractional, and negative values so a bad fixture fails
+ * fast with zero side effects instead of emitting partial callbacks.
+ */
+function assertValidVoucherCount(count: number): void {
+  if (!Number.isFinite(count)) {
+    throw new RangeError(
+      `mock kikis-app: voucherCount must be a finite number, received ${String(count)}`,
+    )
+  }
+  if (!Number.isInteger(count)) {
+    throw new RangeError(
+      `mock kikis-app: voucherCount must be an integer, received ${String(count)}`,
+    )
+  }
+  if (count < 0) {
+    throw new RangeError(
+      `mock kikis-app: voucherCount must be non-negative, received ${String(count)}`,
+    )
+  }
+}
+
+/**
  * Drive a provider's settlement callbacks with synthetic data, with no Express
  * request involved. Useful for unit-testing an `onSettled` (e.g. a Supabase
  * write) in complete isolation. Returns the synthetic settlement record.
@@ -115,6 +143,9 @@ export async function runMockSettlement(
     const channelId = s.channelId ?? DEFAULT_CHANNEL_ID
     const rate = toScaled(s.rate ?? '0.0001')
     const count = s.voucherCount ?? 3
+
+    // Validate before any callback so an invalid fixture has zero side effects.
+    assertValidVoucherCount(count)
 
     if (opts.onSessionOpen) await opts.onSessionOpen(channelId, payer)
 

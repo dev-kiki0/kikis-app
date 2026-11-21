@@ -7,7 +7,20 @@ Smart contracts for KikisApp on Stellar.
 The KikisApp agent vault is a Soroban smart contract account built on top of
 [Crossmint/stellar-smart-account](https://github.com/Crossmint/stellar-smart-account) v1.0.0.
 
-**Status:** Not yet scaffolded. Requires Rust + Soroban SDK setup.
+**Status:** Implemented and checked in. The contract source lives in
+[`agent-vault/src/lib.rs`](agent-vault/src/lib.rs) (including the `AgentVault`
+`__constructor`) and the crate manifest is
+[`agent-vault/Cargo.toml`](agent-vault/Cargo.toml). Tests are in
+[`agent-vault/src/test.rs`](agent-vault/src/test.rs).
+
+### Local build & test
+
+Run from `contracts/agent-vault`:
+
+```bash
+cargo build
+cargo test
+```
 
 ### Policies (Phase 1 implementation)
 
@@ -44,30 +57,24 @@ Because the guarantee is expressed in ledgers, the notice period is always *at l
 
 To make the tradeoff observable, the `upgrade_proposed` event emits both `ready_at_ledger` (the authoritative gate) and `estimated_ready_timestamp` (an advisory wall-clock estimate derived from the current ledger timestamp plus the nominal 5s-per-ledger delay). The estimate is informational and must not be used to decide whether an upgrade is executable.
 
-### Guardian-assisted admin recovery
+### Admin transfer
 
-The vault supports an optional guardian quorum so a single compromised or lost
-admin key cannot permanently brick the vault. Guardians are configured by the
-admin and stored in instance storage:
+Admin rights are transferred with a two-step handshake so a typo cannot hand the
+vault to an unreachable address:
 
-- `set_guardians(guardians, threshold)` — admin only; sets the guardian set and the
-  number of approvals required (`threshold` must be `>= 1` and `<= guardians.len()`).
-  Passing an empty list disables guardian recovery.
-- `guardians()` / `guardian_threshold()` — read the current configuration.
-- `propose_admin_rotation(new_admin)` — a guardian proposes replacing the admin;
-  stores the target and the earliest executable ledger (a fixed timelock) and
-  emits `admin_rotation_proposed`.
-- `approve_admin_rotation(guardian)` — each guardian approves the pending proposal;
-  emits `admin_rotation_approved`.
-- `execute_admin_rotation()` — succeeds once at least `guardian_threshold` distinct
-  guardians have approved **and** the timelock has elapsed; sets the new admin,
-  clears the proposal, and emits `admin_rotated`. This path does **not** require
-  the current admin's authorization, so an unresponsive admin can be replaced.
-- `cancel_admin_rotation()` — admin only; clears a pending proposal.
+- `transfer_admin(new_admin)` — admin only; stores `new_admin` as the pending
+  admin and emits `admin_transfer_requested`.
+- `accept_admin()` — pending admin only; completes the transfer, sets the new
+  admin, clears the pending entry, and emits the corresponding acceptance event.
 
-Guardian recovery is opt-in: when no guardians are configured the vault behaves
-exactly as before. The timelock gives the incumbent admin (and users) notice to
-react to a malicious or mistaken rotation before it takes effect.
+Both calls require the relevant party's authorization, so the incumbent admin
+must still be reachable to start a transfer. Guardian-assisted recovery (a
+quorum of guardians that can rotate the admin without the current admin's
+signature) is **not available in this version** — the contract exposes no
+`set_guardians`, `propose_admin_rotation`, `approve_admin_rotation`,
+`execute_admin_rotation`, or `cancel_admin_rotation` entry points. Operators
+should treat the admin key as a single point of failure and protect it
+accordingly.
 
 ### Prerequisites
 

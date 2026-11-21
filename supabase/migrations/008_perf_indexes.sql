@@ -1,6 +1,6 @@
 -- ============================================================
 -- KikisApp — Performance Indexes Migration
--- Migration 007: Composite and Secondary Indexes for tx_log and sessions
+-- Migration 008: Composite and Secondary Indexes for tx_log and sessions
 -- ============================================================
 
 -- ─── 1. Transaction Log (tx_log) Performance Indexes ─────────

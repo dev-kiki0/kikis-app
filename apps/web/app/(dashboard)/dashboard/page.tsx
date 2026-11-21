@@ -19,6 +19,9 @@ import type { Session, TxLogEntry } from '@/lib/supabase'
 
 type DashboardNetwork = 'testnet' | 'mainnet'
 
+const SESSIONS_PAGE_SIZE = 50
+const TX_LOG_PAGE_SIZE = 20
+
 function resolveNetwork(value: string | string[] | undefined): DashboardNetwork {
   const raw = Array.isArray(value) ? value[0] : value
   return raw === 'mainnet' ? 'mainnet' : 'testnet'
@@ -26,6 +29,14 @@ function resolveNetwork(value: string | string[] | undefined): DashboardNetwork 
 
 async function fetchDashboardData(network: DashboardNetwork) {
   const supabase = getSupabaseServerClient()
+  if (!supabase) {
+    return {
+      sessions: [],
+      txLog: [],
+      stats: null,
+      hasError: true,
+    }
+  }
 
   const [sessionsRes, txLogRes, statsRes] = await Promise.all([
     supabase
@@ -39,7 +50,7 @@ async function fetchDashboardData(network: DashboardNetwork) {
       .select('*')
       .eq('network', network)
       .order('created_at', { ascending: false })
-      .limit(20),
+      .limit(TX_LOG_PAGE_SIZE),
     supabase
       .from('public_dashboard_stats')
       .select('*')
@@ -67,6 +78,44 @@ async function fetchDashboardData(network: DashboardNetwork) {
     stats,
     hasError: Boolean(sessionsRes.error || txLogRes.error || statsRes.error),
   }
+}
+
+async function loadMoreSessions(cursor?: string): Promise<Session[]> {
+  const supabase = getSupabaseServerClient()
+  if (!supabase || !cursor) return []
+
+  const { data, error } = await supabase
+    .from('public_sessions')
+    .select(SESSION_COLUMNS)
+    .lt('opened_at', cursor)
+    .order('opened_at', { ascending: false })
+    .limit(SESSIONS_PAGE_SIZE)
+
+  if (error) {
+    console.error('[dashboard] failed to load more sessions:', error.message)
+    return []
+  }
+
+  return (data ?? []) as Session[]
+}
+
+async function loadMoreTxLog(cursor?: string): Promise<TxLogEntry[]> {
+  const supabase = getSupabaseServerClient()
+  if (!supabase || !cursor) return []
+
+  const { data, error } = await supabase
+    .from('tx_log')
+    .select('*')
+    .lt('created_at', cursor)
+    .order('created_at', { ascending: false })
+    .limit(TX_LOG_PAGE_SIZE)
+
+  if (error) {
+    console.error('[dashboard] failed to load more tx_log:', error.message)
+    return []
+  }
+
+  return (data ?? []) as TxLogEntry[]
 }
 
 export default async function DashboardPage({
@@ -116,14 +165,22 @@ export default async function DashboardPage({
             <SessionTable
               initialSessions={sessions}
               pageSize={SESSIONS_PAGE_SIZE}
-              loadMore={loadMoreSessions}
+              loadMore={async () => {
+                const cursor = sessions[sessions.length - 1]?.opened_at
+                if (!cursor) return
+                await loadMoreSessions(cursor)
+              }}
             />
           </div>
           <div className="lg:col-span-1 min-h-[400px]">
             <TxFeed
               initialEntries={txLog}
               pageSize={TX_LOG_PAGE_SIZE}
-              loadMore={loadMoreTxLog}
+              loadMore={async () => {
+                const cursor = txLog[txLog.length - 1]?.created_at
+                if (!cursor) return
+                await loadMoreTxLog(cursor)
+              }}
             />
           </div>
         </div>

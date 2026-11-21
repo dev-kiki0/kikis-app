@@ -101,11 +101,11 @@ export class InMemorySpendStore implements SpendStore {
   }
 
   async read(): Promise<DailySpend | null> {
-    return this.state ? { ...this.state, endpoints: { ...this.state.endpoints } } : null
+    return this.state ? cloneDailySpend(this.state) : null
   }
 
   async write(state: DailySpend): Promise<void> {
-    this.state = { ...state, endpoints: { ...state.endpoints } }
+    this.state = cloneDailySpend(state)
   }
 
   async mutate(updateFn: SpendUpdater): Promise<void> {
@@ -114,5 +114,17 @@ export class InMemorySpendStore implements SpendStore {
   }
 }
 
-export * from './FileSpendStore.js'
+/**
+ * Deep-copy a {@link DailySpend} snapshot so callers cannot mutate the stored
+ * journal (or the store's copy of a caller's input) through shared references.
+ * Missing pendingReserves is preserved as-is for backwards compatibility.
+ */
+function cloneDailySpend(state: DailySpend): DailySpend {
+  return {
+    ...state,
+    endpoints: { ...state.endpoints },
+    pendingReserves: state.pendingReserves?.map((reserve) => ({ ...reserve })),
+  }
+}
 
+export * from './FileSpendStore.js'

@@ -65,6 +65,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          # Ensure the release label exists
+          if ! gh label list --search release --json name --jq '.[] | select(.name == "release")' | grep -q release; then
+            gh label create release --color FF6B6B --description "Release workflow issues" 2>/dev/null || true
+          fi
+          
           existing=$(gh issue list --state open --label release --search "Release workflow is failing in:title" --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body "Still failing on ${GITHUB_SHA:0:8} — $RUN_URL"

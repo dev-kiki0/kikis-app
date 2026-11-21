@@ -51,7 +51,7 @@ The script demonstrates the full client lifecycle:
 
 ## Successful Run
 
-An asciinema-format transcript of a successful run is included at [`success.cast`](success.cast). The final lines should look like:
+A successful run prints output ending like the sample below. Use these final lines as your local verification reference:
 
 ```text
 [session] closing (received 100 updates)...

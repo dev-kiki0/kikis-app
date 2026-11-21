@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, type ReactNode } from 'react'
-import { motion, useInView } from 'framer-motion'
+import { motion, useInView, useReducedMotion } from 'framer-motion'
 import { EASE_CUBIC } from '@/lib/motion'
 
 interface FadeInUpProps {
@@ -12,7 +12,16 @@ interface FadeInUpProps {
 
 export function FadeInUp({ children, delay = 0, className }: FadeInUpProps) {
   const ref = useRef<HTMLDivElement>(null)
+  const prefersReducedMotion = useReducedMotion()
   const inView = useInView(ref, { once: true, margin: '-60px' })
+
+  if (prefersReducedMotion) {
+    return (
+      <div ref={ref} className={className}>
+        {children}
+      </div>
+    )
+  }
 
   return (
     <motion.div
