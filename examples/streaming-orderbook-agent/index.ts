@@ -10,7 +10,9 @@ const COMMITMENT_SECRET = process.env['COMMITMENT_SECRET'] ?? ''
 // The session handle is assigned after openSession() so the Ctrl+C handler can
 // settle the highest voucher even if the user interrupts the stream.
 let session: SessionHandle | undefined
-let closing = false
+// Shared pending close so concurrent shutdown signals await the same settlement
+// instead of racing to exit before the first close resolves.
+let closePromise: Promise<void> | undefined
 
 function cleanBaseUrl(url: string): string {
   return url.replace(/\/$/, '')
@@ -81,24 +83,33 @@ function printStats(index: number, stats: NonNullable<ReturnType<typeof summariz
   )
 }
 
-async function closeSession(reason: string): Promise<void> {
+function closeSession(reason: string): Promise<void> {
   // close() sends the final cumulative commitment to Provider B, which submits
   // one on-chain settlement transaction for all vouchers used by the session.
-  if (!session || closing) return
-  closing = true
+  // Reuse the in-flight close so overlapping shutdown signals await the same
+  // settlement (and the same outcome) rather than exiting early.
+  if (closePromise) return closePromise
+  if (!session) return Promise.resolve()
 
-  console.log(`\n[session] closing (${reason})...`)
-  const closeResult = await session.close()
+  const activeSession = session
+  closePromise = (async () => {
+    console.log(`\n[session] closing (${reason})...`)
+    const closeResult = await activeSession.close()
 
-  console.log(`[session] settled tx hash: ${closeResult.closeTxHash}`)
-  console.log(`[session] vouchers issued: ${closeResult.vouchersIssued}`)
-  console.log(`[session] total paid: ${closeResult.totalPaid} USDC`)
+    console.log(`[session] settled tx hash: ${closeResult.closeTxHash}`)
+    console.log(`[session] vouchers issued: ${closeResult.vouchersIssued}`)
+    console.log(`[session] total paid: ${closeResult.totalPaid} USDC`)
+  })()
+
+  return closePromise
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
     // A long-lived agent should always close the session before exiting; otherwise
     // the provider has no final settlement request for the consumed stream.
+    // Every signal awaits the shared close promise so only the settled outcome
+    // decides the exit code.
     closeSession(signal)
       .then(() => process.exit(0))
       .catch((error) => {
