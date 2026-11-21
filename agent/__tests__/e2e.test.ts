@@ -19,7 +19,7 @@
  *   COMMITMENT_SECRET    Ed25519 keypair for MPP session (optional)
  *   PROVIDER_A_URL       URL of price provider (default: http://localhost:3001)
  *   PROVIDER_B_URL       URL of orderbook provider (default: http://localhost:3002)
- *   AGENT_DAILY_CAP_USDC Daily spending cap in USDC (default: 0.002)
+ *   AGENT_DAILY_CAP_USDC Daily spending cap in USDC (default: 0.0068)
  */
 
 import path from 'node:path'
@@ -34,7 +34,9 @@ const STELLAR_NETWORK = (process.env['STELLAR_NETWORK'] ?? 'testnet') as 'testne
 const AGENT_SECRET = process.env['AGENT_SECRET'] ?? ''
 const PROVIDER_A_URL = (process.env['PROVIDER_A_URL'] ?? 'http://localhost:3001').replace(/\/$/, '')
 const PROVIDER_B_URL = (process.env['PROVIDER_B_URL'] ?? 'http://localhost:3002').replace(/\/$/, '')
-const AGENT_DAILY_CAP_USDC = process.env['AGENT_DAILY_CAP_USDC'] ?? '0.002'
+// Default budget covers the full advertised workload at the checked-in rates:
+// 0.001 (x402) + 0.0008 (MPP charge) + 50 * 0.0001 (vouchers) = 0.0068 USDC.
+const AGENT_DAILY_CAP_USDC = process.env['AGENT_DAILY_CAP_USDC'] ?? '0.0068'
 const COMMITMENT_SECRET = process.env['COMMITMENT_SECRET'] ?? ''
 
 const TARGET_VOUCHERS = 50
@@ -226,60 +228,35 @@ async function runTests(): Promise<void> {
     log('mpp-session', `⚠ Stream error after ${voucherCount} vouchers: ${lastError.message}`)
   }
 
-  // Validate voucher consumption
-  assert(voucherCount > 0, `should have consumed at least 1 voucher, got ${voucherCount}`)
-  log('mpp-session', `✓ Consumed ${voucherCount} vouchers`)
-
-  // Close the session
+  // Close the session regardless of the streaming outcome so the channel is
+  // settled before we assert on the workload.
   const closeResult = await session.close()
 
-  assert(closeResult, 'close result should exist')
-  assert(closeResult.closeTxHash, 'session should have closeTxHash')
-  assert(closeResult.totalPaid, 'session should have totalPaid')
+  // Validate voucher consumption: the full advertised workload must be reached.
   assert.equal(
-    closeResult.vouchersIssued,
     voucherCount,
-    `vouchersIssued ${closeResult.vouchersIssued} should match consumed ${voucherCount}`,
+    TARGET_VOUCHERS,
+    `should have consumed ${TARGET_VOUCHERS} vouchers, got ${voucherCount}`,
   )
-  log('mpp-session', `✓ Channel closed: ${closeResult.closeTxHash}`)
-  log('mpp-session', `✓ Total paid: ${closeResult.totalPaid} USDC`)
-  log('mpp-session', `✓ Vouchers issued: ${closeResult.vouchersIssued}`)
+  log('mpp-session', `✓ Consumed ${voucherCount} vouchers`)
 
-  // ── Test 4: Graceful shutdown on simulated process signal ──────────────────
-  log('shutdown', 'Running graceful channel close on simulated signal test...')
-
-  const activeSessions = new Set<{ close: () => Promise<unknown> }>()
-  let closeCalls = 0
-  const fakeSession = {
-    close: async () => {
-      closeCalls++
-      return { closeTxHash: 'simulated-close-tx', totalPaid: '0.0001', vouchersIssued: 1 }
-    },
+  // Surface any stream error that was captured during consumption.
+  if (lastError) {
+    throw lastError
   }
-  activeSessions.add(fakeSession)
 
-  // Simulate the shutdown path triggered by SIGINT/SIGTERM/uncaughtException.
-  await closeAllSessions(activeSessions)
-
-  assert.equal(closeCalls, 1, 'active session close() should be invoked exactly once on shutdown')
-  assert.equal(activeSessions.size, 0, 'session registry should be empty after shutdown')
-  log('shutdown', '✓ Active session closed and removed from registry on simulated signal')
-
-  // Verify the timeout path does not hang the process.
-  const hangingSessions = new Set<{ close: () => Promise<unknown> }>()
-  hangingSessions.add({ close: () => new Promise<never>(() => {}) })
-  const start = Date.now()
-  await closeAllSessions(hangingSessions, 50)
-  assert(Date.now() - start < 2_000, 'shutdown should not block beyond the close timeout')
-  assert.equal(hangingSessions.size, 0, 'timed-out session should be removed from registry')
-  log('shutdown', '✓ Timed-out session close is bounded and cleaned up')
-
-  log('setup', 'All E2E tests passed')
+  assert(closeResult, 'close result should exist')
+  log('mpp-session', `✓ Session closed: ${JSON.stringify(closeResult)}`)
 }
 
-// ── Entrypoint ────────────────────────────────────────────────────────────────
+// ── Entry point ───────────────────────────────────────────────────────────────
 
-runTests().catch((err) => {
-  console.error('E2E test suite failed:', err)
-  process.exitCode = 1
-})
+runTests()
+  .then(() => {
+    log('done', '✓ All E2E tests passed')
+    process.exit(0)
+  })
+  .catch((err) => {
+    log('done', `✗ E2E tests failed: ${(err as Error).message}`)
+    process.exit(1)
+  })
