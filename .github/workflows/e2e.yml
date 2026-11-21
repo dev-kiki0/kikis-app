@@ -15,15 +15,25 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       has_secret: ${{ steps.check.outputs.has_secret }}
+      missing: ${{ steps.check.outputs.missing }}
     steps:
       - id: check
         env:
           AGENT_SECRET: ${{ secrets.AGENT_SECRET }}
+          E2E_PAYEE_SECRET: ${{ secrets.E2E_PAYEE_SECRET }}
+          COMMITMENT_SECRET: ${{ secrets.COMMITMENT_SECRET }}
         run: |
-          if [ -n "$AGENT_SECRET" ]; then
+          missing=""
+          [ -z "$AGENT_SECRET" ] && missing="$missing AGENT_SECRET"
+          [ -z "$E2E_PAYEE_SECRET" ] && missing="$missing E2E_PAYEE_SECRET"
+          [ -z "$COMMITMENT_SECRET" ] && missing="$missing COMMITMENT_SECRET"
+          missing="${missing# }"
+          if [ -z "$missing" ]; then
             echo "has_secret=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_secret=false" >> "$GITHUB_OUTPUT"
+            echo "missing=$missing" >> "$GITHUB_OUTPUT"
+            echo "::warning title=E2E credentials incomplete::Missing required secrets: $missing"
           fi
 
   e2e:
@@ -100,7 +110,7 @@ jobs:
           pnpm --filter agent test:e2e
 
   e2e-skipped:
-    name: E2E not run — AGENT_SECRET unavailable
+    name: E2E not run — required credentials unavailable
     needs: secret-check
     if: ${{ needs.secret-check.outputs.has_secret == 'false' }}
     runs-on: ubuntu-latest
@@ -108,14 +118,15 @@ jobs:
       - name: Explain skipped payment verification
         env:
           EVENT_NAME: ${{ github.event_name }}
+          MISSING: ${{ needs.secret-check.outputs.missing }}
         run: |
-          echo 'AGENT_SECRET is not configured; no Stellar payment was executed.'
+          echo "Required E2E credentials are not configured (missing: $MISSING); no Stellar payment was executed."
           case "$EVENT_NAME" in
             schedule|workflow_dispatch)
-              echo "::error title=E2E did not run::$EVENT_NAME runs exist to execute testnet payments, but the AGENT_SECRET repository secret is not set. See docs/AGENT_RUN_CHECKLIST.md to create a funded testnet account."
+              echo "::error title=E2E did not run::$EVENT_NAME runs exist to execute testnet payments, but required repository secrets are not set (missing: $MISSING). See docs/AGENT_RUN_CHECKLIST.md to create a funded testnet account."
               exit 1
               ;;
             *)
-              echo 'The weekly scheduled run and manual dispatch execute payments once AGENT_SECRET is set.'
+              echo "The weekly scheduled run and manual dispatch execute payments once all required secrets are set (missing: $MISSING)."
               ;;
           esac
