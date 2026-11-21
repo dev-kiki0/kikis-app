@@ -83,6 +83,8 @@ export interface AssetConfig {
   asset: string
   /** Stellar Asset Contract (SAC) address for this payment asset */
   asset_contract: string
+  /** Optional: asset decimal precision (defaults to 7 for Stellar SAC assets) */
+  decimals?: number
   /** Optional: restrict this asset to specific payment modes. If omitted, available for all modes. */
   modes?: PaymentMode[]
   /** Optional: restrict this asset to specific endpoints (by name). If omitted, available for all endpoints. */

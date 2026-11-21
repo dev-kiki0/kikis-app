@@ -23,7 +23,7 @@ const PAYER = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN'
 
 type SettleResponse = {
   success: boolean
-  transaction: string
+  transaction?: unknown
   errorReason?: string
 }
 
@@ -182,6 +182,27 @@ describe('kikisAppHono x402 — settle returns success: false (local facilitator
     assert.equal(h.downstream.called, false)
     assert.deepEqual(h.settled, [])
   })
+
+  const invalidTransactions: Array<[string, unknown]> = [
+    ['missing', undefined],
+    ['null', null],
+    ['numeric', 123],
+  ]
+
+  for (const [label, transaction] of invalidTransactions) {
+    it(`rejects success: true with a ${label} transaction field`, async () => {
+      settleResult = { success: true, transaction }
+      const h = makeHarness()
+
+      const res = await paidRequest(h.app)
+
+      assert.equal(res.status, 402)
+      assert.equal(res.headers.get('x-payment-response'), null)
+      assert.equal(h.downstream.called, false, 'downstream handler must not run')
+      assert.deepEqual(h.seenSet, [], 'no idempotency record for a failed settle')
+      assert.deepEqual(h.settled, [], 'onSettled must not fire for a failed settle')
+    })
+  }
 
   it('serves the resource and records the settlement on success', async () => {
     settleResult = { success: true, transaction: 'TX_HASH_1' }
