@@ -38,7 +38,9 @@ export class OnChainRegistry {
     timeoutMs?: number
   }) {
     this.horizon = new Horizon.Server(options.horizonUrl)
-    this.knownAccounts = options.knownAccounts
+    // Snapshot the caller-owned array so later mutations (e.g. reordering) can't
+    // desynchronize request dispatch from post-await result mapping.
+    this.knownAccounts = Object.freeze([...options.knownAccounts])
     this.timeoutMs = options.timeoutMs ?? 10_000
   }
 

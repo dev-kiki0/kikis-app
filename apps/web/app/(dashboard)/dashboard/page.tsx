@@ -72,9 +72,10 @@ async function fetchDashboardData(network: DashboardNetwork) {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams?: { [key: string]: string | string[] | undefined }
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
-  const network = resolveNetwork(searchParams?.network)
+  const resolvedSearchParams = await searchParams
+  const network = resolveNetwork(resolvedSearchParams?.network)
   const { sessions, txLog, stats, hasError } = await fetchDashboardData(network)
 
   return (

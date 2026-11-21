@@ -39,6 +39,9 @@ interface VoucherChartProps {
 export function VoucherChart({ network }: VoucherChartProps) {
   const [data, setData] = useState<ChartPoint[]>([])
   const [loadFailed, setLoadFailed] = useState(false)
+  // True until the first query settles (success or failure). Subsequent polls
+  // must not re-trigger the initial loading UI.
+  const [loading, setLoading] = useState(true)
 
   const fetchData = useCallback(async () => {
     const supabase = getSupabaseBrowserClient()
@@ -61,12 +64,14 @@ export function VoucherChart({ network }: VoucherChartProps) {
       // chart that had loaded.
       console.warn('[voucher-chart] failed to load public_sessions:', error.message)
       setLoadFailed(true)
+      setLoading(false)
       return
     }
     setLoadFailed(false)
 
     if (!rows || rows.length === 0) {
       setData([])
+      setLoading(false)
       return
     }
 
@@ -88,6 +93,7 @@ export function VoucherChart({ network }: VoucherChartProps) {
       })
 
     setData(points)
+    setLoading(false)
   }, [network])
 
   useEffect(() => {
@@ -98,6 +104,19 @@ export function VoucherChart({ network }: VoucherChartProps) {
       clearInterval(interval)
     }
   }, [fetchData])
+
+  if (loading) {
+    return (
+      <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-5">
+        <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-6">
+          Voucher Accumulation
+        </h2>
+        <div className="flex items-center justify-center h-40">
+          <p className="text-sm text-[var(--text-muted)]">Loading session data…</p>
+        </div>
+      </div>
+    )
+  }
 
   if (data.length === 0) {
     return (
