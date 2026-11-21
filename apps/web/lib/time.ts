@@ -29,7 +29,11 @@ export function subscribeNow(listener: () => void): () => void {
 }
 
 export function formatRelativeTime(date: string, nowMs: number): string {
-  const ageSeconds = Math.max(0, Math.floor((nowMs - new Date(date).getTime()) / 1000))
+  const parsed = new Date(date).getTime()
+
+  if (Number.isNaN(parsed)) return 'unknown'
+
+  const ageSeconds = Math.max(0, Math.floor((nowMs - parsed) / 1000))
 
   if (ageSeconds < 60) return `${ageSeconds}s ago`
 

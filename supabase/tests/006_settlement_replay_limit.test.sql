@@ -7,10 +7,14 @@
 -- still return NULL.
 --
 -- Run against a database where the migrations have been applied:
---   psql "$SUPABASE_DB_URL" -f supabase/tests/006_settlement_replay_limit.test.sql
+--   psql -v ON_ERROR_STOP=1 "$SUPABASE_DB_URL" \
+--     -f supabase/tests/006_settlement_replay_limit.test.sql
 --
--- Everything runs inside one transaction and rolls back, so no probe rows
--- are left behind.
+-- ON_ERROR_STOP makes psql exit nonzero when an ASSERT fails instead of
+-- continuing to ROLLBACK and reporting success. Everything runs inside one
+-- transaction and rolls back, so no probe rows are left behind.
+
+\set ON_ERROR_STOP on
 
 BEGIN;
 
@@ -39,10 +43,26 @@ BEGIN
     ASSERT v_count = 5,
         format('replay_count must stay at the budget (5), got %s', v_count);
 
-    -- An explicit p_max_replays argument is honoured at its own boundary.
-    SELECT claim_settlement_replay('__replay_cap_probe__', 5) INTO v_claim;
+    -- An explicit p_max_replays argument is honoured at its own boundary,
+    -- tested on an independent fixture row with a distinct limit of 2.
+    INSERT INTO settlements (key) VALUES ('__replay_explicit_probe__');
+
+    FOR i IN 1..2 LOOP
+        SELECT claim_settlement_replay('__replay_explicit_probe__', 2) INTO v_claim;
+        ASSERT v_claim = i,
+            format('explicit-limit claim %s should return %s, got %s', i, i, v_claim);
+    END LOOP;
+
+    -- The 3rd claim exceeds the explicit limit of 2: refused with -1 ...
+    SELECT claim_settlement_replay('__replay_explicit_probe__', 2) INTO v_claim;
     ASSERT v_claim = -1,
-        format('explicit p_max_replays = 5 must reject as well, got %s', v_claim);
+        format('explicit p_max_replays = 2 must refuse the 3rd claim with -1, got %s', v_claim);
+
+    -- ... and the stored counter stays at the explicit limit.
+    SELECT replay_count INTO v_count
+      FROM settlements WHERE key = '__replay_explicit_probe__';
+    ASSERT v_count = 2,
+        format('replay_count must stay at the explicit limit (2), got %s', v_count);
 
     -- An unknown key returns NULL (distinct from the -1 cap refusal).
     SELECT claim_settlement_replay('__no_such_key__') INTO v_claim;

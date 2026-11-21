@@ -40,7 +40,6 @@ export interface ProviderRegistryConfig {
 }
 
 interface SupabaseProviderRow {
-  id: string
   name: string
   description: string | null
   base_url: string
@@ -48,9 +47,7 @@ interface SupabaseProviderRow {
   tags: string[]
   network: string
   payee: string
-  manifest: unknown
   verified: boolean
-  registered_at: string
 }
 
 export function deriveNetwork(horizonUrl: string): 'testnet' | 'mainnet' {
@@ -84,7 +81,7 @@ export class ProviderRegistry {
     try {
       const { data, error } = await this.supabase
         .from('providers')
-        .select('*')
+        .select('name, description, base_url, modes, tags, network, payee, verified')
         .eq('verified', true)
         .eq('network', this.network)
         .limit(100)
