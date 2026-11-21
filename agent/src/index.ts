@@ -22,6 +22,7 @@ import os from 'node:os'
 import { Keypair } from '@stellar/stellar-sdk'
 import { Horizon } from '@stellar/stellar-sdk'
 import { KikisAppClient, FileSpendStore, KikisAppPolicyRejectError, KikisAppTrustlineError } from '@kikis-app/kikis-app'
+import { USDC_ISSUERS } from '@kikis-app/kikis-app/internal/usdc'
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -41,7 +42,12 @@ const HORIZON_URL =
     ? 'https://horizon-testnet.stellar.org'
     : 'https://horizon.stellar.org'
 
-const EXPLORER_BASE = `https://stellar.expert/explorer/${STELLAR_NETWORK}/tx`
+// Stellar Expert identifies mainnet as "public" in its explorer path.
+const EXPLORER_PATH = STELLAR_NETWORK === 'mainnet' ? 'public' : 'testnet'
+const EXPLORER_BASE = `https://stellar.expert/explorer/${EXPLORER_PATH}/tx`
+
+// Canonical USDC issuer for the active network — must match the SDK's expectation.
+const USDC_ISSUER = USDC_ISSUERS[STELLAR_NETWORK]
 
 // ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -168,24 +174,29 @@ async function main(): Promise<void> {
     commitmentSecret: COMMITMENT_SECRET || undefined,
   })
 
-  // Fetch USDC balance from Horizon — also serves as an early trustline check
+  // Fetch USDC balance from Horizon — also serves as an early trustline check.
+  // Only the canonical USDC issuer for the active network counts as USDC.
   const horizonServer = new Horizon.Server(HORIZON_URL)
   let startingBalance = '0'
   let trustlineFound = false
   try {
     const account = await horizonServer.loadAccount(agentAddress)
     const usdcBalance = account.balances.find(
-      (b) => 'asset_code' in b && b.asset_code === 'USDC',
+      (b) =>
+        'asset_code' in b &&
+        b.asset_code === 'USDC' &&
+        'asset_issuer' in b &&
+        b.asset_issuer === USDC_ISSUER,
     )
     if (usdcBalance) {
       startingBalance = usdcBalance.balance
       trustlineFound = true
     } else {
-      log('Init', 'WARNING: No USDC trustline found — first payment will fail with KikisAppTrustlineError')
-      log('Init', '  Create one: stellar tx new --source <SECRET_KEY> --network mainnet change-trust --asset USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN --limit 100000')
+      log('Init', `WARNING: No USDC trustline for ${STELLAR_NETWORK} (issuer ${USDC_ISSUER}) found — first payment will fail with KikisAppTrustlineError`)
+      log('Init', `  Create one: stellar tx new --source <SECRET_KEY> --network ${STELLAR_NETWORK} change-trust --asset USDC:${USDC_ISSUER} --limit 100000`)
     }
   } catch (err) {
-    log('Init', 'Warning: could not fetch balance from Horizon — continuing')
+    log('Init', `Warning: could not fetch balance from Horizon (${HORIZON_URL}) — continuing`)
   }
 
   log('Init', `[KikisApp Agent] Started. Address: ${agentAddress} Balance: ${startingBalance} USDC`)
@@ -216,59 +227,6 @@ async function main(): Promise<void> {
   log('x402', `price=${JSON.stringify((x402Result.data as { price?: string })?.price)}`)
   log('x402', `explorer: ${explorerLink(x402Result.txHash)}`)
 
-  // ── Step 3: MPP charge query ──────────────────────────────────────────────
 
-  log('mpp-charge', 'Querying price endpoint (natural mode selection → mpp-charge)...')
-  const chargeResult = await client.pay(`${PROVIDER_A_URL}/price`)
 
-  log('mpp-charge', `mode=${chargeResult.mode} txHash=${chargeResult.txHash ?? 'null'} amount=${chargeResult.amount}`)
-  log('mpp-charge', `price=${JSON.stringify((chargeResult.data as { price?: string })?.price)}`)
-  if (chargeResult.txHash) {
-    txHashes.mppCharge = chargeResult.txHash
-    log('mpp-charge', `explorer: ${explorerLink(chargeResult.txHash)}`)
-  }
-
-  // ── Step 4: MPP session streaming ─────────────────────────────────────────
-  log('mpp-session', 'Opening MPP session channel...')
-  const session = trackSession(await client.openSession(`${PROVIDER_B_URL}/stream/orderbook`))
-
-  if (session.openTxHash) {
-    txHashes.channelOpen = session.openTxHash
-  }
-  log('mpp-session', `[Session] Opened. Channel: ${session.channelId} openTxHash: ${session.openTxHash ?? 'n/a (pre-deployed channel)'}`)
-  if (session.openTxHash) {
-    log('mpp-session', `Channel open explorer: ${explorerLink(session.openTxHash)}`)
-  }
-
-  // Consume exactly 50 SSE events from the session stream
-  const TARGET_VOUCHERS = 50
-  let voucherCount = 0
-
-  try {
-    for await (const _item of session.stream()) {
-      voucherCount++
-
-      if (voucherCount % 10 === 0) {
-        const stats = session.stats()
-        log('mpp-session', `[Session] Vouchers: ${stats.vouchersIssued}, Cumulative: $${stats.currentCumulative}`)
-      }
-
-      if (voucherCount >= TARGET_VOUCHERS) break
-    }
-
-    log('mpp-session', `Consumed ${voucherCount} vouchers. Closing session...`)
-    closeResult = await closeSession(session, `consumed ${voucherCount} vouchers`)
-  } finally {
-    if (activeSessions.has(session)) {
-      await closeSession(session, 'finally')
-    }
-  }
-
-  if (!closeResult) {
-    throw new Error('mpp-session close returned no result')
-  }
-
-  txHashes.channelClose = closeResult.closeTxHash
- 
-
-/* … truncated 4085 chars — edit only what you need near the top … */
+/* … truncated 2098 chars — edit only what you need near the top … */

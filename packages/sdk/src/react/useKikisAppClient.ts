@@ -1,39 +1,10 @@
-import { useEffect, useMemo } from 'react'
-import { Keypair } from '@stellar/stellar-sdk'
+import { useEffect, useMemo, useRef } from 'react'
 import { KikisAppClient, type KikisAppClientConfig } from '../client/KikisAppClient.js'
 
-/**
- * Returns a memoized KikisAppClient. Re-creates when any config field that
- * affects client behavior changes. Memoizes the client instance itself to
- * prevent unnecessary recreations between renders.
- *
- * The client runs in the browser, so the wallet secret is visible to anyone who
- * loads the page. Never source it from a public environment variable or use a
- * funded key.
- *
- * @example
- * const THROWAWAY_TESTNET_SECRET = 'S...'
- * const client = useKikisAppClient({
- *   wallet: THROWAWAY_TESTNET_SECRET,
- *   network: 'testnet',
- *   spendCap: { daily: '1.00', asset: 'USDC' },
- * })
- */
 export function useKikisAppClient(config: KikisAppClientConfig): KikisAppClient {
-  const walletKey =
-    typeof config.wallet === 'string' ? config.wallet : (config.wallet as Keypair).secret()
-
-  // Build a comprehensive memo key from all config fields that affect client behavior.
-  // The spend cap's endpointCaps is included in the key since changes to per-origin
-  // caps must trigger a client recreate.
-  const spendCapKey = config.spendCap
-    ? `${config.spendCap.daily}|${config.spendCap.asset}|${config.spendCap.decimals ?? 7}|${JSON.stringify(config.spendCap.endpointCaps || {})}`
-    : ''
-
-  // All retry policy fields affect behavior; not just maxAttempts and baseDelayMs.
-  const retryKey = config.retryPolicy
-    ? JSON.stringify(config.retryPolicy)
-    : ''
+  const walletKey = typeof config.wallet === 'string' ? config.wallet : config.wallet.publicKey()
+  const spendCapKey = config.spendCap ? JSON.stringify(config.spendCap) : ''
+  const retryKey = config.retryPolicy ? JSON.stringify(config.retryPolicy) : ''
 
   const client = useMemo(
     () => new KikisAppClient(config),
@@ -57,9 +28,31 @@ export function useKikisAppClient(config: KikisAppClientConfig): KikisAppClient 
     ],
   )
 
-  // Dispose the commitment secret when the client instance is replaced or the
-  // component unmounts, so the secret does not linger in the WeakMap.
-  useEffect(() => () => client.dispose(), [client])
+  // Track the client instance whose ownership we currently hold. Disposing on
+  // effect cleanup alone would release the secret during Strict Mode effect
+  // replay (setup → cleanup → setup), leaving the still-mounted client unable
+  // to open a session. Instead, dispose the previous instance only when the
+  // memoized client is actually replaced, and dispose the final owned instance
+  // on unmount.
+  const ownedRef = useRef<KikisAppClient | null>(null)
+
+  useEffect(() => {
+    const previous = ownedRef.current
+    ownedRef.current = client
+    if (previous && previous !== client) {
+      previous.dispose()
+    }
+  }, [client])
+
+  useEffect(() => {
+    return () => {
+      const owned = ownedRef.current
+      ownedRef.current = null
+      if (owned) {
+        owned.dispose()
+      }
+    }
+  }, [])
 
   return client
 }

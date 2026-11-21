@@ -29,9 +29,18 @@ echo "  $(node --version)"
 
 step "lockfile is in sync"
 # CI installs with --frozen-lockfile. A package.json edited without rerunning
-# pnpm install fails there before a single test runs.
-pnpm install --frozen-lockfile --prefer-offline >/dev/null 2>&1 \
-  || fail "pnpm-lock.yaml is out of date with a package.json. Run 'pnpm install' at the root and commit the lockfile."
+# pnpm install fails there before a single test runs. Capture the install
+# output so a failure shows the package manager's own diagnostic instead of
+# being masked by a generic lockfile message.
+install_log="$(mktemp)"
+trap 'rm -f "$install_log"' EXIT
+if ! pnpm install --frozen-lockfile --prefer-offline >"$install_log" 2>&1; then
+  cat "$install_log" >&2
+  if grep -qiE 'frozen-lockfile|lockfile.*(out of date|not up to date|mismatch)|ERR_PNPM_OUTDATED_LOCKFILE' "$install_log"; then
+    fail "pnpm-lock.yaml is out of date with a package.json. Run 'pnpm install' at the root and commit the lockfile."
+  fi
+  fail "pnpm install failed. See the package manager output above for the cause."
+fi
 echo "  ok"
 
 step "build sdk packages"

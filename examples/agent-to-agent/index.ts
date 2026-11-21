@@ -91,8 +91,20 @@ function buildSpecialistServer(specialistSecret: string): Hono {
     )
 
     app.post('/summarise', async (c) => {
-        const body = (await c.req.json<{ text?: string }>().catch(() => ({}))) as { text?: string }
-        const text = body.text ?? ''
+        let parsed: unknown
+        try {
+            parsed = await c.req.json()
+        } catch {
+            return c.json({ error: 'Invalid JSON body' }, 400)
+        }
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return c.json({ error: 'Request body must be a JSON object' }, 400)
+        }
+        const rawText = (parsed as { text?: unknown }).text
+        if (rawText !== undefined && typeof rawText !== 'string') {
+            return c.json({ error: 'Field "text" must be a string' }, 400)
+        }
+        const text = rawText ?? ''
         // Canned summarisation — swap for a real LLM call in production.
         const words = text.trim().split(/\s+/).slice(0, 6).join(' ')
         const summary = words.length > 0 ? `Summary: "${words}…"` : 'Summary: (empty input)'

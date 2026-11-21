@@ -39,10 +39,10 @@ export interface ProviderRow {
   name: string
   description: string
   network: string
-  asset: string
   modes: string[]
   tags: string[]
   base_url: string
+  manifest: { asset?: string } | null
   [key: string]: unknown
 }
 
@@ -265,6 +265,13 @@ export async function handleOpenSession(
   }
 
   if (initial_deposit) {
+    const depositNum = parseFloat(initial_deposit)
+    if (isNaN(depositNum) || depositNum <= 0 || !Number.isFinite(depositNum)) {
+      return err(
+        `initial_deposit must be a valid positive number (received ${initial_deposit})`,
+      )
+    }
+
     const baseUrl = new URL(url).origin
     const manifestUrl = `${baseUrl}/.well-known/kikis-app.json`
 
@@ -497,13 +504,20 @@ export async function handleCheckBalance(
     })
   }
 
-  if (asset_code) {
-    const balance = balances.find((b) => b.asset_code === asset_code)
-    return ok({
-      asset: asset_code,
-      balance: balance ? balance.balance : '0',
-      account: keypair.publicKey(),
-    })
+  if (asset_code && !asset_issuer) {
+    return err(
+      `asset_code "${asset_code}" is ambiguous: Stellar balances can contain the same ` +
+        `asset code for multiple issuers. Supply both asset_code and asset_issuer to ` +
+        `identify the exact trustline. Available trustlines for this account: ` +
+        balances
+          .filter((b) => b.asset_code && b.asset_type !== 'native')
+          .map((b) => `${b.asset_code}/${b.asset_issuer}`)
+          .join(', '),
+    )
+  }
+
+  if (asset_issuer && !asset_code) {
+    return err('asset_issuer requires asset_code to be specified')
   }
 
   // Default: native XLM
@@ -575,7 +589,7 @@ export async function handleListProviders(
       name: p.name,
       description: p.description,
       network: p.network,
-      asset: p.asset,
+      asset: p.manifest?.asset ?? '',
       modes: p.modes,
       tags: p.tags,
       base_url: p.base_url,

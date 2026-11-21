@@ -96,8 +96,20 @@ function buildMockServer(): Hono {
     )
 
     app.post('/infer', async (c) => {
-        const body = (await c.req.json<{ prompt?: string }>().catch(() => ({}))) as { prompt?: string }
-        const prompt = (body.prompt ?? '').toLowerCase()
+        let parsed: unknown
+        try {
+            parsed = await c.req.json()
+        } catch {
+            return c.json({ error: 'Invalid JSON body' }, 400)
+        }
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return c.json({ error: 'Request body must be a JSON object' }, 400)
+        }
+        const { prompt: rawPrompt } = parsed as { prompt?: unknown }
+        if (rawPrompt !== undefined && typeof rawPrompt !== 'string') {
+            return c.json({ error: 'Field "prompt" must be a string' }, 400)
+        }
+        const prompt = (rawPrompt ?? '').toLowerCase()
         const key = Object.keys(CANNED_RESPONSES).find((k) => k !== 'default' && prompt.includes(k))
         return c.json({ response: CANNED_RESPONSES[key ?? 'default'], model: 'mock-v1' })
     })

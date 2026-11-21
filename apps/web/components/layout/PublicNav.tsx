@@ -11,12 +11,14 @@ export function PublicNav() {
     function onScroll() {
       setScrolled(window.scrollY > 20)
     }
+    onScroll()
     window.addEventListener('scroll', onScroll, { passive: true })
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
   return (
     <nav
+      aria-label="Primary"
       className={cn(
         'fixed top-0 inset-x-0 z-50 transition-all duration-200',
         scrolled

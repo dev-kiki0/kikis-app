@@ -33,7 +33,14 @@ function requireSecret(name: string, value: string): void {
 }
 
 function formatQuote(data: unknown): string {
-    // Provider A returns { pair, price, timestamp }
+    // Provider A returns { pair, price, timestamp }, but a successful payment
+    // response may carry no JSON body (decoded as null). Guard before reading.
+    if (data === null || data === undefined) {
+        return 'quote unavailable (empty response body)'
+    }
+    if (typeof data !== 'object') {
+        return `quote unavailable (unexpected payload: ${typeof data})`
+    }
     const d = data as { pair?: string; price?: string; timestamp?: string }
     return `pair=${d.pair ?? '?'}  price=${d.price ?? '?'}  ts=${d.timestamp ?? '?'}`
 }
