@@ -30,6 +30,14 @@ describe('formatRelativeTime', () => {
 
     expect(formatRelativeTime('2026-09-26T00:00:05.000Z', now)).toBe('0s ago')
   })
+
+  it('#given a malformed timestamp #when formatting #then it returns the fallback instead of throwing', () => {
+    const now = Date.parse('2026-09-26T00:00:00.000Z')
+
+    expect(() => formatRelativeTime('not-a-date', now)).not.toThrow()
+    expect(formatRelativeTime('not-a-date', now)).toBe('unknown time')
+    expect(formatRelativeTime('', now)).toBe('unknown time')
+  })
 })
 
 describe('subscribeNow', () => {

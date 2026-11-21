@@ -9,7 +9,13 @@ interface RelativeTimeProps {
 
 export function RelativeTime({ date }: RelativeTimeProps) {
   const now = useSyncExternalStore(subscribeNow, getNow, () => null)
-  const isoDate = new Date(date).toISOString()
+  const parsed = new Date(date)
+
+  if (Number.isNaN(parsed.getTime())) {
+    return <time>Unavailable</time>
+  }
+
+  const isoDate = parsed.toISOString()
 
   if (now === null) {
     return <time dateTime={isoDate} title={isoDate}>{isoDate}</time>

@@ -56,6 +56,86 @@ describe('deriveNetwork', () => {
   })
 })
 
+describe('ProviderRegistry Supabase projection', () => {
+  it('selects only the mapped provider columns and maps rows identically', async () => {
+    const sampleRow = {
+      name: 'Supabase Provider',
+      description: 'from supabase',
+      base_url: 'https://provider.example.com',
+      modes: ['x402'],
+      tags: ['test'],
+      network: 'testnet',
+      payee: payeeKeypair.publicKey(),
+      verified: true,
+      // Columns that must not be requested / relied upon.
+      manifest: { 'kikis-app': '1.0' },
+      created_at: '2024-01-01T00:00:00Z',
+    }
+
+    const selectCalls: string[] = []
+    const builder = {
+      select(columns: string) {
+        selectCalls.push(columns)
+        return builder
+      },
+      eq() {
+        return builder
+      },
+      limit() {
+        return builder
+      },
+      then(resolve: (value: { data: unknown[]; error: null }) => unknown) {
+        return Promise.resolve({ data: [sampleRow], error: null }).then(resolve)
+      },
+    }
+
+    const supabase = {
+      from(table: string) {
+        assert.equal(table, 'providers')
+        return builder
+      },
+    }
+
+    const registry = new ProviderRegistry({
+      supabase: supabase as never,
+      network: 'testnet',
+    })
+
+    const records = await registry.listProviders()
+
+    assert.equal(selectCalls.length, 1)
+    const selected = selectCalls[0]
+    assert.notEqual(selected, '*')
+    assert.ok(!selected.includes('manifest'))
+    for (const column of [
+      'name',
+      'description',
+      'base_url',
+      'modes',
+      'tags',
+      'network',
+      'payee',
+      'verified',
+    ]) {
+      assert.ok(selected.includes(column), `expected projection to include ${column}`)
+    }
+
+    assert.deepEqual(records, [
+      {
+        name: 'Supabase Provider',
+        description: 'from supabase',
+        base_url: 'https://provider.example.com',
+        modes: ['x402'],
+        tags: ['test'],
+        network: 'testnet',
+        payee: payeeKeypair.publicKey(),
+        source: 'supabase',
+        verified: true,
+      },
+    ])
+  })
+})
+
 describe('ProviderRegistry.fetchProviderManifest', () => {
   let server: ReturnType<typeof createServer>
   let baseUrl: string
