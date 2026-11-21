@@ -35,8 +35,8 @@ export function usePay(options: PaymentOptions): UsePayReturn {
       if (inFlightRef.current) return null
       inFlightRef.current = true
 
-      const controller = new AbortController()
-      abortRef.current = controller
+      const unmountController = new AbortController()
+      abortRef.current = unmountController
 
       if (mountedRef.current) {
         setLoading(true)
@@ -65,7 +65,7 @@ export function usePay(options: PaymentOptions): UsePayReturn {
         return null
       } finally {
         inFlightRef.current = false
-        if (abortRef.current === controller) {
+        if (abortRef.current === unmountController) {
           abortRef.current = null
         }
         if (mountedRef.current) {
