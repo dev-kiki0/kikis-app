@@ -39,10 +39,10 @@ export interface ProviderRow {
   name: string
   description: string
   network: string
-  asset: string
   modes: string[]
   tags: string[]
   base_url: string
+  manifest: { asset?: string } | null
   [key: string]: unknown
 }
 
@@ -265,6 +265,13 @@ export async function handleOpenSession(
   }
 
   if (initial_deposit) {
+    const depositNum = parseFloat(initial_deposit)
+    if (isNaN(depositNum) || depositNum <= 0 || !Number.isFinite(depositNum)) {
+      return err(
+        `initial_deposit must be a valid positive number (received ${initial_deposit})`,
+      )
+    }
+
     const baseUrl = new URL(url).origin
     const manifestUrl = `${baseUrl}/.well-known/kikis-app.json`
 
@@ -575,7 +582,7 @@ export async function handleListProviders(
       name: p.name,
       description: p.description,
       network: p.network,
-      asset: p.asset,
+      asset: p.manifest?.asset ?? '',
       modes: p.modes,
       tags: p.tags,
       base_url: p.base_url,
