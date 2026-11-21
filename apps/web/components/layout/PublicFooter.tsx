@@ -2,12 +2,13 @@ import { explorerHome } from '@/lib/explorer'
 
 export function PublicFooter() {
   const links = [
-    { label: 'GitHub', href: 'https://github.com/winsznx/kikis-app' },
-    { label: 'npm', href: 'https://www.npmjs.com/package/@kikis-app/kikis-app' },
+    { label: 'GitHub', href: 'https://github.com/winsznx/kikis-app', external: true },
+    { label: 'npm', href: 'https://www.npmjs.com/package/@kikis-app/kikis-app', external: true },
     { label: 'Docs', href: '/docs' },
     {
       label: 'Stellar Explorer',
       href: explorerHome(),
+      external: true,
     },
   ]
 
@@ -40,8 +41,8 @@ export function PublicFooter() {
               <a
                 key={link.label}
                 href={link.href}
-                target="_blank"
-                rel="noopener noreferrer"
+                target={link.external ? '_blank' : undefined}
+                rel={link.external ? 'noopener noreferrer' : undefined}
                 className="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
               >
                 {link.label}

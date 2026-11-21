@@ -142,14 +142,18 @@ VALUES
     NULL,
     'demotxhash004xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
     11
-  );
+  )
+ON CONFLICT (channel_id) DO NOTHING;
 
 
 -- ─── Sample tx_log entries ────────────────────────────────────
 
-INSERT INTO tx_log (tx_type, tx_hash, amount, mode, network, provider_url, agent_address, metadata)
-VALUES
+INSERT INTO tx_log (id, tx_type, tx_hash, amount, mode, network, provider_url, agent_address, metadata)
+SELECT fixture.id::uuid, fixture.tx_type, fixture.tx_hash, fixture.amount, fixture.mode,
+       fixture.network, fixture.provider_url, fixture.agent_address, fixture.metadata
+FROM (VALUES
   (
+    'dea00000-0000-4000-8000-000000000001',
     'x402_settle',
     'demotxhash005xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
     0.001,
@@ -160,6 +164,7 @@ VALUES
     '{"status": 200, "latency_ms": 142}'::jsonb
   ),
   (
+    'dea00000-0000-4000-8000-000000000002',
     'mpp_charge',
     'demotxhash006xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
     0.0008,
@@ -170,6 +175,7 @@ VALUES
     '{"status": 200, "latency_ms": 98}'::jsonb
   ),
   (
+    'dea00000-0000-4000-8000-000000000003',
     'channel_open',
     'demotxhash004xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
     0.10,
@@ -178,4 +184,13 @@ VALUES
     'https://provider-b.railway.app/stream/orderbook',
     'GDEMO1AGENTADDRESS1111111111111111111111111111111111111',
     '{"channel_id": "chan_demo_003_closing"}'::jsonb
-  );
+  )
+) AS fixture(id, tx_type, tx_hash, amount, mode, network, provider_url, agent_address, metadata)
+-- Earlier seed runs assigned generated IDs to these same transaction fixtures.
+WHERE NOT EXISTS (
+  SELECT 1 FROM tx_log AS existing
+  WHERE existing.tx_hash = fixture.tx_hash
+    AND existing.tx_type = fixture.tx_type
+    AND existing.network = fixture.network
+)
+ON CONFLICT (id) DO NOTHING;
