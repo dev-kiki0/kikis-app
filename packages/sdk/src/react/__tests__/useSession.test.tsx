@@ -230,6 +230,46 @@ describe('useSession', () => {
     assert.match(result.current.error?.message ?? '', /auto-close rejected/)
   })
 
+  it('clears a failed close error after a successful retry', async () => {
+    const client = newClient()
+    const mock = mockSession()
+    let attempts = 0
+    mock.handle.close = async (): Promise<SessionCloseResult> => {
+      attempts++
+      if (attempts === 1) {
+        throw new Error('close rejected')
+      }
+      return { closeTxHash: 'close-hash', totalPaid: '0.005', vouchersIssued: 5 }
+    }
+    client.openSession = async () => mock.handle
+
+    const { result } = renderHook(() => useSession('https://x.test/stream'), {
+      wrapper: wrapper(client),
+    })
+    await act(async () => {
+      await result.current.open()
+    })
+    await waitFor(() => assert.equal(result.current.status, 'open'))
+
+    // First close attempt fails: the error is exposed and the handle is
+    // retained for retry.
+    await act(async () => {
+      await result.current.close()
+    })
+    assert.equal(result.current.status, 'error')
+    assert.ok(result.current.error)
+    assert.match(result.current.error?.message ?? '', /close rejected/)
+
+    // Retry succeeds: closed state with no stale error and final totals.
+    await act(async () => {
+      await result.current.close()
+    })
+    assert.equal(result.current.status, 'closed')
+    assert.equal(result.current.error, null)
+    assert.equal(result.current.vouchers, 5)
+    assert.equal(result.current.cumulative, '0.005')
+  })
+
   it('detaches timeout and close-failed listeners on unmount', async () => {
     const client = newClient()
     const mock = mockSession()

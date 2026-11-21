@@ -174,6 +174,7 @@ export function useSession(url: string, options?: UseSessionOptions): UseSession
       if (mountedRef.current) {
         setSession(null)
         setStatus('closed')
+        setError(null)
         setVouchers(r.vouchersIssued)
         setCumulative(r.totalPaid)
       }
