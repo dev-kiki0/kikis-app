@@ -55,6 +55,8 @@ jobs:
         run: pnpm install
       - name: Build nulth-sdk (required by sdk at runtime)
         run: pnpm --filter @kikis-app/nulth-sdk build
+      - name: Run nulth-sdk tests
+        run: pnpm --filter @kikis-app/nulth-sdk test
       - name: Run SDK tests
         run: pnpm --filter @kikis-app/kikis-app test
       - name: Run MCP server tests

@@ -15,6 +15,30 @@ for pkg_dir in "${packages[@]}"; do
   full_path="$root/$pkg_dir"
   echo "Checking packed files for $pkg_dir..."
   
+  # Verify required build artifacts exist
+  pkg_json="$full_path/package.json"
+  if [[ ! -f "$pkg_json" ]]; then
+    echo "ERROR: $pkg_dir package.json not found" >&2
+    exit 1
+  fi
+  
+  # Extract main, module, types fields and verify they exist
+  main=$(node -e "console.log(require('$pkg_json').main || '')")
+  module=$(node -e "console.log(require('$pkg_json').module || '')")
+  types=$(node -e "console.log(require('$pkg_json').types || '')")
+  
+  for artifact in "$main" "$module" "$types"; do
+    if [[ -z "$artifact" ]]; then
+      continue
+    fi
+    
+    artifact_path="$full_path/$artifact"
+    if [[ ! -f "$artifact_path" ]]; then
+      echo "ERROR: Required artifact missing in $pkg_dir: $artifact" >&2
+      exit 1
+    fi
+  done
+  
   # Run npm pack --dry-run --json and parse files without jq
   file_list=$(npm pack --dry-run --json "$full_path" | node -p "JSON.parse(require('fs').readFileSync(0))[0].files.map(f=>f.path).join('\n')")
   
