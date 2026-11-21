@@ -1,7 +1,7 @@
-import { loadEnvFile } from 'node:process'
+import { loadEnvFile } from "node:process";
 
 try {
-  loadEnvFile()
+  loadEnvFile();
 } catch (error) {
-  if (error.code !== 'ENOENT') throw error
+  if (error.code !== "ENOENT") throw error;
 }
