@@ -52,7 +52,7 @@ export function TxFeed({ initialEntries = [] }: TxFeedProps) {
   )
 
   useEffect(() => {
-    if (!configured) return
+    if (!isSupabaseConfigured()) return
 
     const supabase = getSupabaseBrowserClient()
     if (!supabase) return
@@ -150,7 +150,7 @@ export function TxFeed({ initialEntries = [] }: TxFeedProps) {
       stopPolling()
       void supabase.removeChannel(channel)
     }
-  }, [configured])
+  }, [])
 
   // Cursor-based pagination: fetch the next batch strictly older than the
   // oldest row currently shown, using a composite cursor of (created_at, id)
@@ -213,7 +213,7 @@ export function TxFeed({ initialEntries = [] }: TxFeedProps) {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {!configured ? (
+        {!isSupabaseConfigured() ? (
           <div className="px-5 py-8 text-center">
             <p className="text-sm font-medium text-[var(--text-primary)]">Supabase not configured</p>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
