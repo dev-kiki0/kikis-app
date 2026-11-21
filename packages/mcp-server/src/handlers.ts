@@ -504,13 +504,20 @@ export async function handleCheckBalance(
     })
   }
 
-  if (asset_code) {
-    const balance = balances.find((b) => b.asset_code === asset_code)
-    return ok({
-      asset: asset_code,
-      balance: balance ? balance.balance : '0',
-      account: keypair.publicKey(),
-    })
+  if (asset_code && !asset_issuer) {
+    return err(
+      `asset_code "${asset_code}" is ambiguous: Stellar balances can contain the same ` +
+        `asset code for multiple issuers. Supply both asset_code and asset_issuer to ` +
+        `identify the exact trustline. Available trustlines for this account: ` +
+        balances
+          .filter((b) => b.asset_code && b.asset_type !== 'native')
+          .map((b) => `${b.asset_code}/${b.asset_issuer}`)
+          .join(', '),
+    )
+  }
+
+  if (asset_issuer && !asset_code) {
+    return err('asset_issuer requires asset_code to be specified')
   }
 
   // Default: native XLM
