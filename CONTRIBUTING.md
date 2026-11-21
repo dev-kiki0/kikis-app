@@ -35,6 +35,10 @@ pnpm verify          # build + typecheck + tests + provider bundles
 pnpm verify --fast   # build + typecheck only
 ```
 
+Those are the only two accepted forms. Any other argument — a misspelled
+flag, an extra argument, or `--fast` in a position it does not belong — is
+rejected with a usage message and a nonzero exit before any checks run.
+
 A **pre-push hook** runs `pnpm verify --fast` automatically. It is installed by
 `pnpm install` (via `prepare`, which sets `core.hooksPath`), so you get it
 without doing anything. Bypass with `git push --no-verify` when you need to.

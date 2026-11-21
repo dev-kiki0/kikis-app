@@ -11,8 +11,27 @@
 # failures that do not exist and hides ones that do.
 set -euo pipefail
 
+usage() {
+  cat >&2 <<'EOF'
+Usage: pnpm verify [--fast]
+
+  (no arguments)  build + typecheck + tests + provider bundles
+  --fast          build + typecheck only
+EOF
+}
+
 FAST=0
-[[ "${1:-}" == "--fast" ]] && FAST=1
+if (( $# == 0 )); then
+  :
+elif (( $# == 1 )) && [[ "$1" == "--fast" ]]; then
+  FAST=1
+else
+  printf '\033[31m✘ unrecognized arguments:\033[0m' >&2
+  printf ' %q' "$@" >&2
+  printf '\n\n' >&2
+  usage
+  exit 2
+fi
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
