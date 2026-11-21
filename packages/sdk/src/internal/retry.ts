@@ -43,7 +43,16 @@ export async function withRetry<T>(
       if (isLast || !shouldRetry(error)) {
         throw error;
       }
-      const delay = Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
+      // Compute exponential backoff, but bound against maxDelayMs.
+      // If the error includes a retryAfterMs hint, use it but still cap at maxDelayMs
+      // to prevent a malicious or misbehaving upstream from freezing the client.
+      let delay = Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
+      if (error && typeof error === 'object' && 'retryAfterMs' in error) {
+        const retryAfterMs = (error as any).retryAfterMs;
+        if (typeof retryAfterMs === 'number' && retryAfterMs > 0) {
+          delay = Math.min(retryAfterMs, maxDelayMs);
+        }
+      }
       await sleep(delay);
     }
   }
