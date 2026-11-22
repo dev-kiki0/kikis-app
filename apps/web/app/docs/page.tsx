@@ -77,7 +77,7 @@ export default function DocsPage() {
           </nav>
 
           {/* Content */}
-          <div className="space-y-16">
+          <main className="space-y-16">
             <div>
               <h1 className="text-3xl font-bold text-[var(--text-primary)] mb-2">Documentation</h1>
               <p className="text-[var(--text-secondary)]">
@@ -296,14 +296,22 @@ fastify.get('/price', async () => ({ price: '0.199', pair: 'XLM/USDC' }))`}</Cod
 
             <Section id="discovery" icon={Search} title="Discovery Registry">
               <p>
-                The Supabase <InlineCode>providers</InlineCode> table indexes manifests with
-                <InlineCode>pg_trgm</InlineCode> trigram search. Agents can query by capability:
+                The Supabase <InlineCode>providers</InlineCode> table trigram-indexes its
+                <InlineCode>name</InlineCode> and <InlineCode>description</InlineCode> columns with
+                <InlineCode>pg_trgm</InlineCode>, so agents can search by capability rather than by URL.
+                A provider's capabilities live in its <InlineCode>description</InlineCode>, so the
+                similarity query targets that column — the example below is an indexed description
+                lookup, not a name lookup:
               </p>
               <Code>{`SELECT * FROM providers
-WHERE name % 'streaming price feed'
-ORDER BY similarity(name, 'streaming price feed') DESC`}</Code>
+WHERE description % 'streaming price feed'
+ORDER BY similarity(description, 'streaming price feed') DESC`}</Code>
               <p>
-                Tags, description, and manifest JSON are all indexed. No exact keyword matching required.
+                <InlineCode>name</InlineCode> and <InlineCode>description</InlineCode> each carry a
+                trigram GIN index that backs the <InlineCode>%</InlineCode> operator and
+                <InlineCode>similarity()</InlineCode>. <InlineCode>tags</InlineCode>,
+                <InlineCode>categories</InlineCode>, and the <InlineCode>manifest</InlineCode> JSON
+                have separate GIN indexes for exact containment lookups, not similarity search.
               </p>
             </Section>
 
@@ -330,7 +338,7 @@ PROVIDER_B_URL=http://localhost:3002`}</Code>
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 NEXT_PUBLIC_STELLAR_NETWORK=testnet`}</Code>
             </Section>
-          </div>
+          </main>
         </div>
       </div>
     </div>

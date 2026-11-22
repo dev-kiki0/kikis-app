@@ -41,10 +41,30 @@ export function getAssetIssuer(asset: string, network: string): string {
 }
 
 /**
+ * Assert `decimals` is a usable asset scale: a non-negative integer.
+ *
+ * The converters never reach an invalid scale through amount parsing — it
+ * only surfaces later as a BigInt conversion or a negative-exponent error, or
+ * worse, as a misleading "excess amount precision" message: a negative scale
+ * makes `frac.length > decimals` true for any amount, so a valid amount is
+ * rejected for the wrong reason. Validate the scale up front so a bad asset
+ * config is reported as an invalid scale, distinct from a bad amount input.
+ */
+function assertValidScale(decimals: number): void {
+  if (!Number.isInteger(decimals) || decimals < 0) {
+    throw new RangeError(
+      `Invalid asset scale: decimals must be a non-negative integer, got ${decimals}`,
+    )
+  }
+}
+
+/**
  * Convert a decimal amount string to integer units using asset-specific decimals.
- * Throws RangeError on malformed input, negatives, or over-precision.
+ * Throws RangeError on an invalid scale (negative, non-integer, NaN, or
+ * Infinity), on malformed amount input, on negatives, or on over-precision.
  */
 export function amountToStroops(amount: string, decimals: number): bigint {
+  assertValidScale(decimals)
   const match = /^(\d+)(?:\.(\d+))?$/.exec(amount.trim())
   if (!match) {
     throw new RangeError(`Invalid amount: "${amount}"`)
@@ -67,9 +87,11 @@ export function amountToStroops(amount: string, decimals: number): bigint {
 
 /**
  * Inverse of {@link amountToStroops}: format integer units as a canonical
- * decimal string with the given number of decimals.
+ * decimal string with the given number of decimals. Throws RangeError on an
+ * invalid scale (negative, non-integer, NaN, or Infinity) or on negative units.
  */
 export function stroopsToAmount(units: bigint, decimals: number): string {
+  assertValidScale(decimals)
   if (units < 0n) {
     throw new RangeError(`Invalid units: "${units.toString()}" is negative`)
   }

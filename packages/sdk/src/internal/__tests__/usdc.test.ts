@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { usdcToStroops, stroopsToUsdc, usdcToUnits, USDC_DECIMALS } from '../usdc.js'
+import { usdcToStroops, stroopsToUsdc, usdcToUnits, USDC_DECIMALS, amountToStroops, stroopsToAmount } from '../usdc.js'
 
 /**
  * Shared acceptance table for the USDC → stroops converter. Mirrors the table
@@ -77,5 +77,41 @@ describe('stroopsToUsdc (inverse converter)', () => {
 
   it('rejects negative stroops', () => {
     assert.throws(() => stroopsToUsdc(-1n), RangeError)
+  })
+})
+
+describe('amountToStroops / stroopsToAmount (generic asset converters)', () => {
+  it('converts valid amounts for the given asset scale', () => {
+    assert.equal(amountToStroops('1.50', 2), 150n)
+    assert.equal(amountToStroops('123', 2), 12300n)
+    assert.equal(amountToStroops('0.00008', 7), 800n)
+    assert.equal(stroopsToAmount(150n, 2), '1.5')
+    assert.equal(stroopsToAmount(5n, 0), '5')
+    assert.equal(stroopsToAmount(800n, 7), '0.00008')
+  })
+
+  // #given an invalid asset scale (negative, fractional, NaN, or Infinity)
+  // #when a converter runs
+  // #then it reports an invalid scale, not an amount-precision problem
+  it('rejects an invalid scale as an invalid scale, not excess amount precision', () => {
+    // Before the fix, amountToStroops('5', -1) threw
+    // `Amount "5" exceeds -1 decimals of precision` — a valid amount blamed for
+    // a bad scale. The scale must read as the invalid input instead.
+    for (const decimals of [-1, 2.5, NaN, Infinity]) {
+      assert.throws(
+        () => amountToStroops('5', decimals),
+        /Invalid asset scale/,
+        `amountToStroops should reject scale ${String(decimals)}`,
+      )
+      assert.throws(
+        () => stroopsToAmount(5n, decimals),
+        /Invalid asset scale/,
+        `stroopsToAmount should reject scale ${String(decimals)}`,
+      )
+    }
+  })
+
+  it('still reports genuine amount over-precision against a valid scale', () => {
+    assert.throws(() => amountToStroops('1.234', 2), /exceeds 2 decimals of precision/)
   })
 })
