@@ -61,13 +61,15 @@ When running the full demo, set `COMMITMENT_SECRET` to a key whose corresponding
 > Always pass a durable `SpendStore` (such as `FileSpendStore` pointing to disk, Redis, or SQL) via `spendStore` in `KikisAppClientConfig`:
 >
 > ```typescript
+> import { homedir } from 'node:os'
+> import { join } from 'node:path'
 > import { KikisAppClient, FileSpendStore } from '@kikis-app/kikis-app'
 >
 > const client = new KikisAppClient({
 >   wallet: keypair,
 >   network: 'testnet',
 >   spendCap: { daily: '10.0', asset: 'USDC' },
->   spendStore: new FileSpendStore('~/.kikis-app/spend.json'),
+>   spendStore: new FileSpendStore(join(homedir(), '.kikis-app', 'spend.json')),
 > })
 > ```
 
