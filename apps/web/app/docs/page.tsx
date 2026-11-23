@@ -131,7 +131,7 @@ const session = await client.openSession('https://provider.example.com/stream', 
 })
 for await (const update of session.stream()) {
   console.log(update)
-  if (done) break
+  if (update.done) break
 }
 const closeResult = await session.close()
 // closeResult.closeTxHash — on-chain settlement hash
