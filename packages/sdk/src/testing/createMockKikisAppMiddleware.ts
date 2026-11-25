@@ -180,7 +180,7 @@ export async function runMockSettlement(
  * skips both the callbacks and the route handler — exactly as a real payment
  * rejection would.
  *
- * The synthetic settlement is attached to `req.kikis-app` for assertions.
+ * The synthetic settlement is attached to `req['kikis-app']` for assertions.
  *
  * @example
  * ```ts
